@@ -1,0 +1,10 @@
+{
+  "description": "Manage your personal account and resources seamlessly across devices with unified login, data synchronization, notifications, and sharing history.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
