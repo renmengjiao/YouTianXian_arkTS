@@ -1,222 +1,126 @@
-import { SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DIVIDER, PRIMARY,BORDER } from '../constants/CommonConstants';
+import { promptAction } from '@kit.ArkUI';
+import { SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DIVIDER, PRIMARY, BORDER } from '../constants/CommonConstants';
+import { UploadRecord } from '../model/CommonModels';
+import { fetchUploadRecords, clearUploadRecords } from '../api/uploadApi';
 
 @Component
 export struct UploadsTab {
+  @State private records: UploadRecord[] = [];
+  @State private loading: boolean = false;
+  @State private page: number = 1;
+  @State private total: number = 0;
+
+  aboutToAppear(): void {
+    this.loadData();
+  }
+
+  private async loadData(): Promise<void> {
+    this.loading = true;
+    try {
+      const resp = await fetchUploadRecords(this.page, 10);
+      if (resp.code === 200) {
+        this.records = resp.data.items;
+        this.total = resp.data.total;
+      }
+    } catch (e) {
+      console.error('Failed to load upload records', JSON.stringify(e));
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  private async handleClear(): Promise<void> {
+    try {
+      const resp = await clearUploadRecords();
+      if (resp.code === 200) {
+        promptAction.showToast({ message: '已清空所有记录', duration: 1500 });
+        this.records = [];
+        this.total = 0;
+      }
+    } catch (e) {
+      promptAction.showToast({ message: '清空失败', duration: 1500 });
+    }
+  }
+
+  private statusText(status: string): string {
+    if (status === 'completed') { return '已完成'; }
+    if (status === 'uploading') { return '上传中'; }
+    if (status === 'failed') { return '失败'; }
+    return status;
+  }
+
+  private statusColor(status: string): ResourceColor {
+    if (status === 'completed') { return '#4CAF50'; }
+    if (status === 'uploading') { return '#FF9800'; }
+    if (status === 'failed') { return '#E53935'; }
+    return TEXT_MUTED;
+  }
+
+  private statusBg(status: string): ResourceColor {
+    if (status === 'completed') { return '#E8F5E9'; }
+    if (status === 'uploading') { return '#FFF3E0'; }
+    if (status === 'failed') { return '#FFEBEE'; }
+    return '#F5F5F5';
+  }
+
   build() {
     Column() {
-      List({ space: 8 }) {
-        // ---- 条目 1 ----
-        ListItem() {
-          Row() {
-            // 左侧图标
-            Image($r('app.media.template'))
-              .width(20).height(20)
-              .margin({ right: 16 })
-
-            // 中间区域：上下两层
-            Column({ space: 4 }) {
-              // 第一行：文件名 + 状态标签
+      if (this.loading && this.records.length === 0) {
+        Text('加载中...')
+          .fontSize(14).fontColor(TEXT_MUTED)
+          .margin({ top: 40 });
+      } else if (this.records.length === 0) {
+        Text('暂无上传记录')
+          .fontSize(14).fontColor(TEXT_MUTED)
+          .margin({ top: 40 });
+      } else {
+        List({ space: 8 }) {
+          ForEach(this.records, (item: UploadRecord) => {
+            ListItem() {
               Row() {
-                Text('5G NR天线参数计算模板')
-                  .fontSize(14).fontColor(TEXT_PRIMARY)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis });
-                Text('审核中')
-                  .fontSize(12).fontColor('#34C759')
-                  .backgroundColor('#FFFFFF')
-                  .borderRadius(4)
-                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                  .margin({ left: 16 });
+                Image($r('app.media.folder'))
+                  .width(20).height(20)
+                  .margin({ right: 16 });
+
+                Column({ space: 4 }) {
+                  Text(item.fileName)
+                    .fontSize(14).fontColor(TEXT_PRIMARY);
+                  Text(item.fileSize + ' · ' + item.uploadTime)
+                    .fontSize(12).fontColor(TEXT_MUTED);
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start);
+
+                // 状态标签
+                Text(this.statusText(item.status))
+                  .fontSize(12)
+                  .fontColor(this.statusColor(item.status))
+                  .backgroundColor(this.statusBg(item.status))
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                  .borderRadius(10);
               }
               .width('100%')
-              .justifyContent(FlexAlign.Start)
-              .alignItems(VerticalAlign.Center);
-
-              // 第二行：文件详情（辅助文字）
-              Text('天线阵列 · 8.4 MB · 2026-08-30 14:32')
-                .fontSize(12).fontColor(TEXT_MUTED);
+              .padding(12)
+              .backgroundColor(SURFACE)
+              .borderRadius(8);
             }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start);
-
-            // 右侧操作按钮
-            Row({ space: 8 }) {
-              Button('审核进度')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-              Button('查看详情')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-            }
-          }
-          .height(64)
-          .padding({ left: 16, right: 16 });
+          }, (item: UploadRecord) => String(item.id));
         }
+        .width('100%');
 
-        // ---- 条目 2 ----
-        ListItem() {
-          Row() {
-            Image($r('app.media.template'))
-              .width(20).height(20)
-              .margin({ right: 16 })
-
-            // 中间区域：上下两层
-            Column({ space: 4 }) {
-              // 第一行：文件名 + 状态标签
-              Row() {
-                Text('毫米波束成型阵列模板')
-                  .fontSize(14).fontColor(TEXT_PRIMARY)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis });
-                Text('已发布')
-                  .fontSize(12).fontColor('#007DFF')
-                  .backgroundColor('#FFFFFF')
-                  .borderRadius(4)
-                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                  .margin({ left: 16 });
-              }
-              .width('100%')
-              .justifyContent(FlexAlign.Start)
-              .alignItems(VerticalAlign.Center);
-
-              // 第二行：文件详情（辅助文字）
-              Text('天线阵列 · 8.4 MB · 2026-08-30 14:32')
-                .fontSize(12).fontColor(TEXT_MUTED);
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start);
-
-            Row({ space: 8 }) {
-              Button('审核进度')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-              Button('查看详情')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-            }
-          }
-          .height(64)
-          .padding({ left: 16, right: 16 });
-        }
-
-        // ---- 条目 3 ----
-        ListItem() {
-          Row() {
-            Image($r('app.media.template'))
-              .width(20).height(20)
-              .margin({ right: 16 })
-
-            Column({ space: 4 }) {
-              // 第一行：文件名 + 状态标签
-              Row() {
-                Text('微带馈线网络设计模板')
-                  .fontSize(14).fontColor(TEXT_PRIMARY)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis });
-                Text('已下架')
-                  .fontSize(12).fontColor('#6B7280')
-                  .backgroundColor('#FFFFFF')
-                  .borderRadius(4)
-                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                  .margin({ left: 16 });
-              }
-              .width('100%')
-              .justifyContent(FlexAlign.Start)
-              .alignItems(VerticalAlign.Center);
-
-              // 第二行：文件详情（辅助文字）
-              Text('天线阵列 · 8.4 MB · 2026-08-30 14:32')
-                .fontSize(12).fontColor(TEXT_MUTED);
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start);
-
-            Row({ space: 8 }) {
-              Button('审核进度')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-              Button('查看详情')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-            }
-          }
-          .height(64)
-          .padding({ left: 16, right: 16 });
-        }
-
-        // ---- 条目 4 ----
-        ListItem() {
-          Row() {
-            Image($r('app.media.template'))
-              .width(20).height(20)
-              .margin({ right: 16 })
-
-            Column({ space: 4 }) {
-              // 第一行：文件名 + 状态标签
-              Row() {
-                Text('同轴天线仿真入门模板')
-                  .fontSize(14).fontColor(TEXT_PRIMARY)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis });
-                Text('已发布')
-                  .fontSize(12).fontColor('#007DFF')
-                  .backgroundColor('#FFFFFF')
-                  .borderRadius(4)
-                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                  .margin({ left: 16 });
-              }
-              .width('100%')
-              .justifyContent(FlexAlign.Start)
-              .alignItems(VerticalAlign.Center);
-
-              // 第二行：文件详情（辅助文字）
-              Text('天线阵列 · 8.4 MB · 2026-08-30 14:32')
-                .fontSize(12).fontColor(TEXT_MUTED);
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start);
-
-            Row({ space: 8 }) {
-              Button('审核进度')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-              Button('查看详情')
-                .fontSize(12).fontColor(TEXT_SECONDARY)
-                .backgroundColor(Color.Transparent)
-                .border({ width: 1, color: BORDER })
-                .borderRadius(4)
-                .padding({ left: 14, right: 14, top: 6, bottom: 6 });
-            }
-          }
-          .height(64)
-          .padding({ left: 16, right: 16 });
-        }
+        // 清空按钮
+        Button('清空所有记录')
+          .width('100%').height(44)
+          .fontSize(14).fontColor(Color.White)
+          .backgroundColor('#E53935')
+          .borderRadius(8)
+          .margin({ top: 16 })
+          .onClick(() => {
+            this.handleClear();
+          });
       }
-      .divider({ strokeWidth: 1, color: DIVIDER, startMargin: 16, endMargin: 16 })
-      .width('100%')
-      .height('100%');
     }
-    .padding({ top: 24 });
+    .width('100%')
+    .padding({ left: 18, right: 18 });
   }
 }

@@ -6,6 +6,10 @@ import { StorageTab } from './StorageTab';
 import { UploadsTab } from './UploadsTab';
 import { SecurityTab } from './SecurityTab';
 
+import { fetchUserProfile, login, register } from '../api/userApi';
+import { HttpClient, ApiResponse } from '../api/httpClient';
+import { UserInfo, LoginResponse } from '../model/UserInfo';
+
 import {
   commonConstants,
   PRIMARY, PRIMARY_LIGHT, PAGE_BACKGROUND, SURFACE,
@@ -22,21 +26,39 @@ struct Index {
   private readonly breakpointSystem: BreakpointSystem =
     new BreakpointSystem(commonConstants.breakpointSystemName);
 
-  @State private loggedIn: boolean = true;
+  @State private loggedIn: boolean = false;
+  @State private authLoading: boolean = false;
   @State private registerMode: boolean = false;
   @State private panel: Panel = 'profile';
-  @State private name: string = '用户gf';
-  @State private phone: string = '13800138000';
-  @State private email: string = 'usergf@huawei.com';
-  @State private department: string = '技术部';
+  @State private userInfo: UserInfo | null = null;
+  @State private isLoading: boolean = false;
+  @State private name: string = '';
+  @State private phone: string = '';
+  @State private email: string = '';
+  @State private department: string = '';
   @State private password: string = '';
   @State private code: string = '';
   @State private remember: boolean = true;
   @State private currentIndex: number = 0;
+  @State private msgTabIndex: number = 0;
   @State private sidebarCollapsed: boolean = false;
 
   aboutToAppear(): void {
     this.breakpointSystem.register(this.getUIContext());
+  }
+
+  private async loadUserProfile(): Promise<void> {
+    this.isLoading = true;
+    try {
+      const resp = await fetchUserProfile();
+      if (resp.code === 200) {
+        this.userInfo = resp.data;
+      }
+    } catch (e) {
+      console.error('Failed to load profile', JSON.stringify(e));
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   aboutToDisappear(): void {
@@ -62,6 +84,59 @@ struct Index {
 
   @Builder
   private buildAuth() {
+    if (this.isWideScreen()) {
+      // 宽屏：左右分栏布局
+      Row() {
+        // ── 左侧品牌展示区（#007DFF 底色） ──
+        Column() {
+          Text('优天线')
+            .fontSize(54)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White);
+          Text('天线工程师的专业社区')
+            .fontSize(18)
+            .fontColor(Color.White)
+            .opacity(0.85)
+            .margin({ top: 16 });
+          Text('分享项目 · 管理模板 · 协同设计')
+            .fontSize(14)
+            .fontColor(Color.White)
+            .opacity(0.6)
+            .margin({ top: 10 });
+        }
+        .width('55%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor('#007DFF');
+
+        // ── 右侧登录/注册卡片 ──
+        Column() {
+          this.buildAuthCard();
+        }
+        .width('45%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor(PAGE_BACKGROUND);
+      }
+      .width('100%')
+      .height('100%');
+    } else {
+      // 窄屏：保留原卡片居中布局
+      Column() {
+        this.buildAuthCard();
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(HorizontalAlign.Center)
+      .backgroundColor('#007DFF');
+    }
+  }
+
+  @Builder
+  private buildAuthCard() {
     Column() {
       Column({ space: 8 }) {
         Text('优天线')
@@ -107,12 +182,13 @@ struct Index {
           }
           .width('100%');
         }
-        Button(this.registerMode ? '注册并登录' : '登录')
+        Button(this.authLoading ? '请稍候...' : (this.registerMode ? '注册并登录' : '登录'))
           .width('100%')
           .height(48)
-          .backgroundColor(PRIMARY)
+          .backgroundColor(this.authLoading ? '#B0B0B0' : PRIMARY)
           .fontColor(Color.White)
           .borderRadius(8)
+          .enabled(!this.authLoading)
           .onClick(() => this.submitAuth());
         Text(this.registerMode ? '已有账号？返回登录' : '没有账号？立即注册')
           .width('100%')
@@ -124,13 +200,13 @@ struct Index {
       .width('100%')
       .margin({ top: 28 });
     }
-    .width(this.isWideScreen() ? 440 : 'calc(100% - 32vp)')
-    .padding(this.isWideScreen() ? 36 : 24)
+    .width(this.isWideScreen() ? 400 : 'calc(100% - 32vp)')
+    .padding(36)
     .backgroundColor(SIDEBAR_BG)
     .borderRadius(8);
   }
 
-  private submitAuth(): void {
+  private async submitAuth(): Promise<void> {
     if (this.email.trim().length === 0 || this.password.length === 0) {
       promptAction.showToast({ message: '请输入邮箱和密码' });
       return;
@@ -139,9 +215,41 @@ struct Index {
       promptAction.showToast({ message: '请输入邮箱验证码' });
       return;
     }
-    this.loggedIn = true;
-    this.panel = 'home';
-    promptAction.showToast({ message: this.registerMode ? '注册成功' : '登录成功' });
+
+    this.authLoading = true;
+    try {
+      let res: ApiResponse<LoginResponse>;
+      if (this.registerMode) {
+        res = await register({
+          username: this.email.trim(),
+          password: this.password,
+          name: this.email.split('@')[0],
+          email: this.email.trim()
+        });
+      } else {
+        res = await login({
+          username: this.email.trim(),
+          password: this.password
+        });
+      }
+      if (res.code === 0 && res.data) {
+        HttpClient.getInstance().setToken(res.data.token);
+        this.userInfo = res.data.user;
+        this.name = res.data.user.name;
+        this.phone = res.data.user.phone;
+        this.email = res.data.user.email;
+        this.department = res.data.user.department;
+        this.loggedIn = true;
+        this.panel = 'home';
+        promptAction.showToast({ message: this.registerMode ? '注册成功' : '登录成功' });
+      } else {
+        promptAction.showToast({ message: res.message || '认证失败，请重试' });
+      }
+    } catch (e) {
+      promptAction.showToast({ message: '网络异常，请检查连接后重试' });
+    } finally {
+      this.authLoading = false;
+    }
   }
 
   @Builder
@@ -174,7 +282,7 @@ struct Index {
         .fontColor(PRIMARY);
       Blank();
       // 用户头像：取昵称首字符生成圆形头像
-      Text(this.name.slice(0, 1))
+      Text((this.userInfo?.name ?? 'U').slice(0, 1))
         .width(36)
         .height(36)
         .textAlign(TextAlign.Center)
@@ -184,7 +292,7 @@ struct Index {
         .backgroundColor(PRIMARY)
         .borderRadius(18);
       // 用户昵称
-      Text(this.name)
+      Text(this.userInfo?.name ?? '用户')
         .fontSize(14)
         .fontColor(TEXT_PRIMARY)
         .maxLines(1)
@@ -397,7 +505,7 @@ struct Index {
           .fontColor(TEXT_PRIMARY);
       }
       .width('100%')
-      .padding({ top: 24, left: 32, right: 32, bottom: 0 });
+      .padding({ top: 24, left: 0, right: 0, bottom: 0 });
 
       if (this.panel === 'info') {
         this.buildInfo();
@@ -472,7 +580,7 @@ struct Index {
       }
       .width('100%')
       .justifyContent(FlexAlign.Start)   // ✅ 手动 Row 左对齐，绝对生效
-      .padding({ left: 24, top: 8, bottom: 8 })
+      .padding({ top: 8, bottom: 8 })
       .border({ width: { bottom: 1 }, color: DIVIDER })
 
       // ── 内容区（按 currentIndex 切换） ──
@@ -623,7 +731,7 @@ struct Index {
   private buildSecurity() {
     Column() {
       this.buildRecord('登录密码', '已设置', '定期修改密码可提升账号安全');
-      this.buildRecord('绑定邮箱', this.email, '用于登录和安全验证');
+      this.buildRecord('绑定邮箱', this.userInfo?.email ?? '未绑定', '用于登录和安全验证');
       this.buildRecord('登录设备', '2 台设备', '最近登录：今天 10:32');
       Button('修改密码')
         .width('100%')
@@ -707,16 +815,127 @@ struct Index {
   }
 
   @Builder
+  @Builder
   private buildMessages() {
     Column() {
-      this.buildRecord('李明回复了你的评论', '10 分钟前', '这个阵列间距设置非常合理');
-      this.buildRecord('王浩赞了你的模板', '2 小时前', '毫米波波束成形阵列模板获得新赞');
-      this.buildRecord('系统通知', '昨天', '你的项目文件已完成云端同步');
+      // ── TabBar ──
+      Row() {
+        this.buildMessageTab('互动消息', 0)
+        this.buildMessageTab('管理员消息', 1)
+        this.buildMessageTab('系统通知', 2)
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Start)
+      .padding({ top: 8, bottom: 8 })
+      .border({ width: { bottom: 1 }, color: DIVIDER })
+
+      // ── 内容区（按 msgTabIndex 切换） ──
+      Scroll() {
+        Column() {
+          if (this.msgTabIndex === 0) {
+            this.buildMessageItem('李明', '李明 回复了你的评论',
+              '这个阵列间距设置非常合理，感谢分享！', '10 分钟前', true);
+            this.buildMessageItem('王浩', '王浩 赞了你的模板',
+              '毫米波波束成形阵列模板获得新赞', '2 小时前', true);
+            this.buildMessageItem('赵敏', '赵敏 评论了你的项目',
+              '5G基站MIMO阵列的仿真结果很有参考价值', '昨天', false);
+            this.buildMessageItem('陈工', '陈工 分享了文件给你',
+              '天线测试报告_v3.pdf · 12.5 MB', '3 天前', true);
+          } else if (this.msgTabIndex === 1) {
+            this.buildMessageItem('管理员', '账号安全提醒',
+              '检测到新设备登录，如非本人操作请及时修改密码', '1 小时前', true);
+            this.buildMessageItem('管理员', '实名认证通知',
+              '请尽快完成实名认证，以解锁全部功能', '3 天前', false);
+            this.buildMessageItem('管理员', '存储空间升级',
+              '您的存储空间已使用 80%，建议清理或升级', '1 周前', false);
+          } else {
+            this.buildMessageItem('系统', '项目同步完成',
+              '「毫米波 8×8 相控阵天线设计」已成功同步至云端', '30 分钟前', true);
+            this.buildMessageItem('系统', '模板审核通过',
+              '您提交的「微带贴片天线阵列模板」已通过审核', '昨天', false);
+            this.buildMessageItem('系统', '版本更新通知',
+              '系统已更新至 v2.3.0，新增多项功能', '2 天前', true);
+            this.buildMessageItem('系统', '备份完成',
+              '所有项目文件已于 2026-09-23 03:00 完成自动备份', '3 天前', false);
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ top: 24 })
+      }
+      .width('100%')
+      .layoutWeight(1)
+    }
+    .width('100%');
+  }
+
+  @Builder
+  private buildMessageTab(title: string, index: number) {
+    Column() {
+      Text(title)
+        .fontSize(14)
+        .fontColor(this.msgTabIndex === index ? PRIMARY : TEXT_SECONDARY)
+        .fontWeight(this.msgTabIndex === index ? FontWeight.Bold : FontWeight.Regular)
+        .padding({ bottom: 4 })
+        .border({
+          width: this.msgTabIndex === index ? { bottom: 2 } : 0,
+          color: PRIMARY
+        })
+    }
+    .height(48)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 16, right: 16 })
+    .onClick(() => this.msgTabIndex = index);
+  }
+
+  @Builder
+  private buildMessageItem(name: string, title: string, summary: string, time: string, unread: boolean) {
+    Row() {
+      // ── 左侧：彩色圆形头像 ──
+      Text(name.charAt(0))
+        .fontSize(22)
+        .fontColor(Color.White)
+        .fontWeight(FontWeight.Bold)
+        .width(56)
+        .height(56)
+        .textAlign(TextAlign.Center)
+        .borderRadius(28)
+        .backgroundColor(PRIMARY);
+
+      // ── 中间：消息内容 ──
+      Column({ space: 4 }) {
+        Text(title)
+          .fontSize(15)
+          .fontWeight(unread ? FontWeight.Medium : FontWeight.Regular)
+          .fontColor(TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+        Text(summary)
+          .fontSize(12)
+          .fontColor(TEXT_SECONDARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+        Text(time)
+          .fontSize(12)
+          .fontColor(TEXT_MUTED);
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
+
+      // ── 右侧：未读蓝点 ──
+      if (unread) {
+        Circle()
+          .width(8)
+          .height(8)
+          .fill(PRIMARY)
+          .margin({ left: 12 });
+      }
     }
     .width('100%')
-    .padding({ left: 18, right: 18 })
-    .backgroundColor(SURFACE)
-    .borderRadius(8);
+    .padding({ top: 16, bottom: 16 })
+    .border({ width: { bottom: 1 }, color: DIVIDER });
   }
 
   @Builder
