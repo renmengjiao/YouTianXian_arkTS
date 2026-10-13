@@ -1,22 +1,18 @@
-/**
- * 上传记录 API
- */
 import { HttpClient, ApiResponse, PageData } from './httpClient';
-import { UploadRecord } from '../model/CommonModels';
+import { UploadRecord, UploadRecordFilter, ClearUploadRecordsRequest, ClearRecordsResult } from '../model/CommonModels';
 
-/** 分页参数 */
-interface PageParams {
-  page: number;
-  page_size: number;
-}
+interface PageParams extends UploadRecordFilter { page: number; pageSize: number; }
 
-/** 获取上传记录（分页） */
-export function fetchUploadRecords(page: number, pageSize: number): Promise<ApiResponse<PageData<UploadRecord>>> {
-  const params: PageParams = { page: page, page_size: pageSize };
+export function fetchUploadRecords(page: number, pageSize: number,
+  filter: UploadRecordFilter = {}): Promise<ApiResponse<PageData<UploadRecord>>> {
+  const params: PageParams = { page: page, pageSize: pageSize };
+  if (filter.startTime?.trim()) params.startTime = filter.startTime.trim();
+  if (filter.endTime?.trim()) params.endTime = filter.endTime.trim();
+  if (filter.status && filter.status !== 'all') params.status = filter.status;
   return HttpClient.getInstance().get<PageData<UploadRecord>>('/user/upload-records', params);
 }
 
-/** 清空上传记录 */
-export function clearUploadRecords(): Promise<ApiResponse<null>> {
-  return HttpClient.getInstance().delete<null>('/user/upload-records');
+/** 仅清理日志，不删除文件或释放存储。 */
+export function clearUploadRecords(body: ClearUploadRecordsRequest): Promise<ApiResponse<ClearRecordsResult>> {
+  return HttpClient.getInstance().deleteJson<ClearRecordsResult>('/user/upload-records', body);
 }

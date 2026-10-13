@@ -1,15 +1,22 @@
 /**
  * 用户相关 API
  */
+import { http } from '@kit.NetworkKit';
 import { HttpClient, ApiResponse } from './httpClient';
 import { UserInfo, LoginRequest, RegisterRequest, LoginResponse,
-  PasswordUpdate, NotificationSettings } from '../model/UserInfo';
-import { LoginRecord } from '../model/CommonModels';
+  PasswordUpdate, NotificationSettings, RefreshTokenRequest, ProfileUpdate, NotificationSettingsUpdate, NotificationUpdateResult } from '../model/UserInfo';
+import { LoginRecord, LoginRecordFilter, ClearLoginRecordsRequest, ClearRecordsResult } from '../model/CommonModels';
 import { PageData } from './httpClient';
 
 /** 头像上传响应 */
-interface AvatarResponse {
-  avatar: string;
+export interface AvatarResponse {
+  avatarUrl: string;
+}
+
+export interface AvatarUpload {
+  data: ArrayBuffer;
+  contentType: string;
+  remoteFileName: string;
 }
 
 /** 未读计数响应 */
@@ -17,19 +24,14 @@ interface UnreadCountResponse {
   count: number;
 }
 
-/** 文件上传 body */
-interface AvatarBody {
-  fileUri: string;
-}
-
 /** 登录 */
 export function login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
-  return HttpClient.getInstance().post<LoginResponse>('/auth/login', data);
+  return HttpClient.getInstance().postPublic<LoginResponse>('/auth/login', data);
 }
 
 /** 注册 */
 export function register(data: RegisterRequest): Promise<ApiResponse<LoginResponse>> {
-  return HttpClient.getInstance().post<LoginResponse>('/auth/register', data);
+  return HttpClient.getInstance().postPublic<LoginResponse>('/auth/register', data);
 }
 
 /** 获取用户信息 */
@@ -38,14 +40,19 @@ export function fetchUserProfile(): Promise<ApiResponse<UserInfo>> {
 }
 
 /** 编辑用户信息 */
-export function updateUserProfile(data: object): Promise<ApiResponse<UserInfo>> {
-  return HttpClient.getInstance().put<UserInfo>('/user/profile', data);
+export function updateUserProfile(data: ProfileUpdate): Promise<ApiResponse<null>> {
+  return HttpClient.getInstance().put<null>('/user/profile', data);
 }
 
 /** 上传头像 */
-export function uploadAvatar(fileUri: string): Promise<ApiResponse<AvatarResponse>> {
-  const body: AvatarBody = { fileUri: fileUri };
-  return HttpClient.getInstance().post<AvatarResponse>('/user/avatar', body);
+export function uploadAvatar(file: AvatarUpload): Promise<ApiResponse<AvatarResponse>> {
+  const parts: http.MultiFormData[] = [{
+    name: 'avatar',
+    contentType: file.contentType,
+    remoteFileName: file.remoteFileName,
+    data: file.data
+  }];
+  return HttpClient.getInstance().postMultipart<AvatarResponse>('/user/avatar', parts);
 }
 
 /** 获取通知设置 */
@@ -54,14 +61,15 @@ export function fetchNotificationSettings(): Promise<ApiResponse<NotificationSet
 }
 
 /** 更新通知设置 */
-export function updateNotificationSettings(data: NotificationSettings): Promise<ApiResponse<NotificationSettings>> {
-  return HttpClient.getInstance().put<NotificationSettings>('/user/notification-settings', data);
+export function updateNotificationSettings(
+  data: NotificationSettingsUpdate): Promise<ApiResponse<NotificationUpdateResult>> {
+  return HttpClient.getInstance().put<NotificationUpdateResult>('/user/notification-settings', data);
 }
 
 /** 分页参数 */
-interface LoginPageParams {
+interface LoginPageParams extends LoginRecordFilter {
   page: number;
-  page_size: number;
+  pageSize: number;
 }
 
 /** 修改密码 */
@@ -70,17 +78,27 @@ export function changePassword(data: PasswordUpdate): Promise<ApiResponse<null>>
 }
 
 /** 获取登录记录（分页） */
-export function fetchLoginRecords(page: number, pageSize: number): Promise<ApiResponse<PageData<LoginRecord>>> {
-  const params: LoginPageParams = { page: page, page_size: pageSize };
+export function fetchLoginRecords(page: number, pageSize: number,
+  filter: LoginRecordFilter = {}): Promise<ApiResponse<PageData<LoginRecord>>> {
+  const params: LoginPageParams = { page: page, pageSize: pageSize };
+  if (filter.startTime?.trim()) params.startTime = filter.startTime.trim();
+  if (filter.endTime?.trim()) params.endTime = filter.endTime.trim();
+  if (filter.deviceType && filter.deviceType !== 'all') params.deviceType = filter.deviceType;
   return HttpClient.getInstance().get<PageData<LoginRecord>>('/user/login-records', params);
 }
 
 /** 清空登录记录 */
-export function clearLoginRecords(): Promise<ApiResponse<null>> {
-  return HttpClient.getInstance().delete<null>('/user/login-records');
+export function clearLoginRecords(body: ClearLoginRecordsRequest): Promise<ApiResponse<ClearRecordsResult>> {
+  return HttpClient.getInstance().deleteJson<ClearRecordsResult>('/user/login-records', body);
 }
 
 /** 退出登录 */
-export function logout(): Promise<ApiResponse<null>> {
-  return HttpClient.getInstance().post<null>('/auth/logout');
+export function refresh(refreshToken: string): Promise<ApiResponse<LoginResponse>> {
+  const body: RefreshTokenRequest = { refreshToken: refreshToken };
+  return HttpClient.getInstance().postPublic<LoginResponse>('/auth/refresh', body);
+}
+
+export function logout(refreshToken: string): Promise<ApiResponse<null>> {
+  const body: RefreshTokenRequest = { refreshToken: refreshToken };
+  return HttpClient.getInstance().postPublic<null>('/auth/logout', body);
 }

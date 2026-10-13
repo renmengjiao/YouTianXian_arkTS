@@ -5,10 +5,11 @@ import { SharingRecordTab } from './SharingRecordTab';
 import { StorageTab } from './StorageTab';
 import { UploadsTab } from './UploadsTab';
 import { SecurityTab } from './SecurityTab';
+import { UserAvatar } from '../components/UserAvatar';
 
-import { fetchUserProfile, login, register } from '../api/userApi';
-import { HttpClient, ApiResponse } from '../api/httpClient';
-import { UserInfo, LoginResponse } from '../model/UserInfo';
+import { fetchUserProfile } from '../api/userApi';
+import { UserInfo, RegisterRequest } from '../model/UserInfo';
+import { SessionManager } from '../session/SessionManager';
 
 import {
   commonConstants,
@@ -37,7 +38,12 @@ struct Index {
   @State private email: string = '';
   @State private department: string = '';
   @State private password: string = '';
-  @State private code: string = '';
+  @State private account: string = '';
+  @State private registerUsername: string = '';
+  @State private registerNickname: string = '';
+  @State private registerPhone: string = '';
+  @State private sessionRestoring: boolean = true;
+  @State private logoutLoading: boolean = false;
   @State private remember: boolean = true;
   @State private currentIndex: number = 0;
   @State private msgTabIndex: number = 0;
@@ -45,6 +51,62 @@ struct Index {
 
   aboutToAppear(): void {
     this.breakpointSystem.register(this.getUIContext());
+    SessionManager.getInstance().setListener((user) => this.applySession(user));
+    this.restoreSession();
+  }
+
+  private applySession(user: UserInfo | null): void {
+    const previousUserId = this.userInfo?.userId;
+    this.userInfo = user;
+    this.loggedIn = user !== null;
+    this.name = user?.nickname ?? '';
+    this.phone = user?.phone ?? '';
+    this.email = user?.email ?? '';
+    this.department = user?.department ?? '';
+    if (!user || previousUserId !== user.userId) {
+      this.password = '';
+      this.currentIndex = 0;
+      this.panel = 'profile';
+    }
+  }
+
+  private async restoreSession(): Promise<void> {
+    try {
+      const user = await SessionManager.getInstance().restore();
+      this.applySession(user);
+      if (user) {
+        this.remember = true;
+      }
+    } catch (error) {
+      this.applySession(null);
+      promptAction.showToast({
+        message: (error as Error).message || '无法恢复登录，请重新登录'
+      });
+    } finally {
+      this.sessionRestoring = false;
+    }
+  }
+
+  private async handleLogout(): Promise<void> {
+    if (this.logoutLoading) {
+      return;
+    }
+    this.logoutLoading = true;
+    try {
+      const result = await SessionManager.getInstance().logout();
+      let message = '已退出登录';
+      if (!result.storageCleared) {
+        message = '退出未完全完成：本机登录状态清理失败，请重试';
+      } else if (!result.remoteRevoked) {
+        message = '本机已退出，服务端会话撤销未确认';
+      }
+      this.registerUsername = '';
+      this.registerNickname = '';
+      this.registerPhone = '';
+      promptAction.showToast({ message: message });
+    } finally {
+      this.logoutLoading = false;
+    }
   }
 
   private async loadUserProfile(): Promise<void> {
@@ -63,6 +125,7 @@ struct Index {
 
   aboutToDisappear(): void {
     this.breakpointSystem.unregister();
+    SessionManager.getInstance().setListener(null);
   }
 
   private isWideScreen(): boolean {
@@ -71,7 +134,11 @@ struct Index {
 
   build() {
     Column() {
-      if (this.loggedIn) {
+      if (this.sessionRestoring) {
+        Text('正在恢复登录状态...')
+          .fontSize(14).fontColor(TEXT_MUTED)
+          .margin({ top: 48 });
+      } else if (this.loggedIn) {
         this.buildWorkspace();
       } else {
         this.buildAuth();
@@ -156,46 +223,52 @@ struct Index {
       .alignItems(HorizontalAlign.Start);
 
       Column({ space: 14 }) {
-        TextInput({ placeholder: '邮箱', text: this.email })
-          .onChange((value: string) => this.email = value)
-          .height(50)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(8);
-        TextInput({ placeholder: this.registerMode ? '设置密码' : '密码', text: this.password })
+        if (this.registerMode) {
+          TextInput({ placeholder: '用户名（3～64个字符）', text: this.registerUsername })
+            .onChange((value: string) => this.registerUsername = value)
+            .height(50).backgroundColor(PAGE_BACKGROUND).borderRadius(8);
+          TextInput({ placeholder: '昵称', text: this.registerNickname })
+            .onChange((value: string) => this.registerNickname = value)
+            .height(50).backgroundColor(PAGE_BACKGROUND).borderRadius(8);
+          TextInput({ placeholder: '手机号（可选）', text: this.registerPhone })
+            .type(InputType.PhoneNumber)
+            .onChange((value: string) => this.registerPhone = value)
+            .height(50).backgroundColor(PAGE_BACKGROUND).borderRadius(8);
+        } else {
+          TextInput({ placeholder: '用户名或手机号', text: this.account })
+            .onChange((value: string) => this.account = value)
+            .height(50).backgroundColor(PAGE_BACKGROUND).borderRadius(8);
+        }
+        TextInput({ placeholder: this.registerMode ? '设置密码（6～64个字符）' : '密码',
+          text: this.password })
           .type(InputType.Password)
           .onChange((value: string) => this.password = value)
-          .height(50)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(8);
-        if (this.registerMode) {
-          TextInput({ placeholder: '邮箱验证码', text: this.code })
-            .onChange((value: string) => this.code = value)
-            .height(50)
-            .backgroundColor(PAGE_BACKGROUND)
-            .borderRadius(8);
-        } else {
-          Row({ space: 8 }) {
-            Toggle({ type: ToggleType.Checkbox, isOn: this.remember })
-              .selectedColor(PRIMARY)
-              .onChange((isOn: boolean) => this.remember = isOn);
-            Text('记住登录状态').fontSize(13).fontColor(TEXT_MUTED);
-          }
-          .width('100%');
+          .height(50).backgroundColor(PAGE_BACKGROUND).borderRadius(8);
+        Row({ space: 8 }) {
+          Toggle({ type: ToggleType.Checkbox, isOn: this.remember })
+            .selectedColor(PRIMARY)
+            .onChange((isOn: boolean) => this.remember = isOn);
+          Text('记住登录状态').fontSize(13).fontColor(TEXT_MUTED);
         }
+        .width('100%');
         Button(this.authLoading ? '请稍候...' : (this.registerMode ? '注册并登录' : '登录'))
           .width('100%')
           .height(48)
           .backgroundColor(this.authLoading ? '#B0B0B0' : PRIMARY)
           .fontColor(Color.White)
           .borderRadius(8)
-          .enabled(!this.authLoading)
+          .enabled(!this.authLoading && !this.logoutLoading)
           .onClick(() => this.submitAuth());
         Text(this.registerMode ? '已有账号？返回登录' : '没有账号？立即注册')
           .width('100%')
           .textAlign(TextAlign.Center)
           .fontSize(14)
           .fontColor(PRIMARY)
-          .onClick(() => this.registerMode = !this.registerMode);
+          .enabled(!this.authLoading && !this.logoutLoading)
+          .onClick(() => {
+            this.registerMode = !this.registerMode;
+            this.password = '';
+          });
       }
       .width('100%')
       .margin({ top: 28 });
@@ -207,46 +280,59 @@ struct Index {
   }
 
   private async submitAuth(): Promise<void> {
-    if (this.email.trim().length === 0 || this.password.length === 0) {
-      promptAction.showToast({ message: '请输入邮箱和密码' });
+    if (this.authLoading || this.logoutLoading || this.sessionRestoring) {
       return;
     }
-    if (this.registerMode && this.code.trim().length === 0) {
-      promptAction.showToast({ message: '请输入邮箱验证码' });
+    if (!this.password.trim()) {
+      promptAction.showToast({ message: '请输入密码' });
+      return;
+    }
+    if (this.registerMode) {
+      const username = this.registerUsername.trim();
+      if (username.length < 3 || username.length > 64) {
+        promptAction.showToast({ message: '用户名长度需在3～64个字符之间' });
+        return;
+      }
+      if (!this.registerNickname.trim()) {
+        promptAction.showToast({ message: '请输入昵称' });
+        return;
+      }
+      if (this.password.length < 6 || this.password.length > 64) {
+        promptAction.showToast({ message: '密码长度需在6～64个字符之间' });
+        return;
+      }
+      if (this.registerPhone.trim() && !/^1\d{10}$/.test(this.registerPhone.trim())) {
+        promptAction.showToast({ message: '请输入正确的11位手机号' });
+        return;
+      }
+    } else if (!this.account.trim()) {
+      promptAction.showToast({ message: '请输入用户名或手机号' });
       return;
     }
 
+    const registering = this.registerMode;
     this.authLoading = true;
     try {
-      let res: ApiResponse<LoginResponse>;
-      if (this.registerMode) {
-        res = await register({
-          username: this.email.trim(),
-          password: this.password,
-          name: this.email.split('@')[0],
-          email: this.email.trim()
-        });
-      } else {
-        res = await login({
-          username: this.email.trim(),
+      if (registering) {
+        const body: RegisterRequest = {
+          username: this.registerUsername.trim(),
+          nickname: this.registerNickname.trim(),
           password: this.password
-        });
-      }
-      if (res.code === 0 && res.data) {
-        HttpClient.getInstance().setToken(res.data.token);
-        this.userInfo = res.data.user;
-        this.name = res.data.user.name;
-        this.phone = res.data.user.phone;
-        this.email = res.data.user.email;
-        this.department = res.data.user.department;
-        this.loggedIn = true;
-        this.panel = 'home';
-        promptAction.showToast({ message: this.registerMode ? '注册成功' : '登录成功' });
+        };
+        if (this.registerPhone.trim()) {
+          body.phone = this.registerPhone.trim();
+        }
+        await SessionManager.getInstance().register(body, this.remember);
       } else {
-        promptAction.showToast({ message: res.message || '认证失败，请重试' });
+        await SessionManager.getInstance().login({
+          account: this.account.trim(), password: this.password
+        }, this.remember);
       }
-    } catch (e) {
-      promptAction.showToast({ message: '网络异常，请检查连接后重试' });
+      promptAction.showToast({ message: registering ? '注册成功' : '登录成功' });
+    } catch (error) {
+      promptAction.showToast({
+        message: (error as Error).message || '认证失败，请重试'
+      });
     } finally {
       this.authLoading = false;
     }
@@ -281,18 +367,13 @@ struct Index {
         .fontWeight(FontWeight.Bold)
         .fontColor(PRIMARY);
       Blank();
-      // 用户头像：取昵称首字符生成圆形头像
-      Text((this.userInfo?.name ?? 'U').slice(0, 1))
-        .width(36)
-        .height(36)
-        .textAlign(TextAlign.Center)
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(Color.White)
-        .backgroundColor(PRIMARY)
-        .borderRadius(18);
+      UserAvatar({
+        avatar: this.userInfo?.avatar ?? null,
+        nickname: this.userInfo?.nickname ?? '',
+        avatarSize: 36
+      });
       // 用户昵称
-      Text(this.userInfo?.name ?? '用户')
+      Text(this.userInfo?.nickname ?? '用户')
         .fontSize(14)
         .fontColor(TEXT_PRIMARY)
         .maxLines(1)
@@ -308,11 +389,8 @@ struct Index {
         .fontSize(14)
         .fontColor(DANGER)
         .margin({ left: 20 })
-        .onClick(() => {
-          this.loggedIn = false;
-          this.panel = 'home';
-          this.password = '';
-        });
+        .enabled(!this.logoutLoading)
+        .onClick(() => this.handleLogout());
     }
     .width('100%')
     .height(58)
@@ -481,7 +559,7 @@ struct Index {
       .alignItems(HorizontalAlign.Start) // 👈 核心关键：强制左对齐，解决居中问题
     }
     .layoutWeight(1)
-    .width(this.isWideScreen() ? 'calc(100% - 220vp)' : '100%')
+    .width('100%')
     .scrollBar(BarState.Off);
   }
   @Builder
@@ -508,13 +586,20 @@ struct Index {
       .padding({ top: 24, left: 0, right: 0, bottom: 0 });
 
       if (this.panel === 'info') {
-        this.buildInfo();
+        Scroll() {
+          BasicInfoTab();
+        }
+        .width('100%').layoutWeight(1).scrollBar(BarState.Off);
       } else if (this.panel === 'storage') {
-        this.buildStorage();
+        Scroll() { StorageTab(); }
+        .width('100%').scrollBar(BarState.Off);
       } else if (this.panel === 'security') {
-        this.buildSecurity();
+        Scroll() {
+          SecurityTab({ onLogout: () => this.handleLogout(), onEditProfile: () => this.panel = 'info' });
+        }
+        .width('100%').scrollBar(BarState.Off);
       } else if (this.panel === 'messages') {
-        this.buildMessages();
+        Text('消息中心暂未接入，当前不展示示例消息').fontColor(TEXT_MUTED);
       } else if (this.panel === 'repos') {
         this.buildRepos();
       } else if (this.panel === 'templates') {
@@ -525,8 +610,10 @@ struct Index {
         this.buildAssistant();
       } else if (this.panel === 'profile') {
         this.buildProfile();
-      } else {
-        this.buildRecords();
+      } else if (this.panel === 'sharing') {
+        SharingRecordTab();
+      } else if (this.panel === 'uploads') {
+        UploadsTab();
       }
     }
     .width('100%')
@@ -538,7 +625,7 @@ struct Index {
       return '基本信息';
     }
     if (this.panel === 'sharing') {
-      return '共享记录';
+      return '我分享的';
     }
     if (this.panel === 'storage') {
       return '存储空间';
@@ -573,7 +660,7 @@ struct Index {
       // ── 手动 TabBar ──
       Row() {
         this.buildCustomTab('基本信息', 0)
-        this.buildCustomTab('共享记录', 1)
+        this.buildCustomTab('我分享的', 1)
         this.buildCustomTab('上传记录', 2)
         this.buildCustomTab('存储空间', 3)
         this.buildCustomTab('账号安全', 4)
@@ -586,11 +673,11 @@ struct Index {
       // ── 内容区（按 currentIndex 切换） ──
       Scroll() {
         Column() {
-          if (this.currentIndex === 0) { BasicInfoTab({ name: this.name, phone: this.phone, email: this.email, department: this.department }) }
+          if (this.currentIndex === 0) { BasicInfoTab() }
           else if (this.currentIndex === 1) { SharingRecordTab() }
           else if (this.currentIndex === 2) { UploadsTab() }
           else if (this.currentIndex === 3) { StorageTab() }
-          else if (this.currentIndex === 4) { SecurityTab() }
+          else if (this.currentIndex === 4) { SecurityTab({ onLogout: () => this.handleLogout(), onEditProfile: () => this.currentIndex = 0 }) }
         }
         .padding({ top: 24 })
       }
@@ -641,130 +728,6 @@ struct Index {
   }
 
   @Builder
-  private buildInfo() {
-    Column({ space: 4 }) {
-      Column({ space: 8 }) {
-        Text('姓名（昵称）').fontSize(13).fontColor(TEXT_MUTED);
-        TextInput({ text: this.name })
-          .onChange((value: string) => this.name = value)
-          .height(48)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(6);
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start);
-      Column({ space: 8 }) {
-        Text('手机号').fontSize(13).fontColor(TEXT_MUTED);
-        TextInput({ text: this.phone })
-          .onChange((value: string) => this.phone = value)
-          .height(48)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(6);
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start);
-      Column({ space: 8 }) {
-        Text('邮箱').fontSize(13).fontColor(TEXT_MUTED);
-        TextInput({ text: this.email })
-          .onChange((value: string) => this.email = value)
-          .height(48)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(6);
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start);
-      Column({ space: 8 }) {
-        Text('部门').fontSize(13).fontColor(TEXT_MUTED);
-        TextInput({ text: this.department })
-          .onChange((value: string) => this.department = value)
-          .height(48)
-          .backgroundColor(PAGE_BACKGROUND)
-          .borderRadius(6);
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start);
-      Button('保存修改')
-        .width('100%')
-        .height(46)
-        .backgroundColor(PRIMARY)
-        .fontColor(Color.White)
-        .borderRadius(4)
-        .onClick(() => promptAction.showToast({ message: '个人资料已保存' }));
-    }
-    .width('100%')
-    .padding(18)
-    .backgroundColor(SURFACE)
-    .borderRadius(8)
-    .alignItems(HorizontalAlign.Start);
-  }
-
-  @Builder
-  private buildStorage() {
-    Column({ space: 18 }) {
-      Row() {
-        Column({ space: 16 }) {
-          Text('24 GB').fontSize(28).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY);
-          Text('已使用，共 100 GB').fontSize(13).fontColor(TEXT_MUTED);
-        }
-        .alignItems(HorizontalAlign.Start);
-        Blank();
-        Text('24%').fontSize(18).fontWeight(FontWeight.Medium).fontColor(PRIMARY);
-      }
-      .width('100%');
-      Progress({ value: 24, total: 100, type: ProgressType.Linear })
-        .width('100%')
-        .height(10)
-        .color(PRIMARY)
-        .backgroundColor(PRIMARY_LIGHT);
-      this.buildRecord('项目文件', '15.6 GB', '65%');
-      this.buildRecord('测试数据', '6.8 GB', '28%');
-      this.buildRecord('其他文件', '1.6 GB', '7%');
-    }
-    .width('100%')
-    .padding(18)
-    .backgroundColor(SURFACE)
-    .borderRadius(8)
-    .alignItems(HorizontalAlign.Start);
-  }
-
-  @Builder
-  private buildSecurity() {
-    Column() {
-      this.buildRecord('登录密码', '已设置', '定期修改密码可提升账号安全');
-      this.buildRecord('绑定邮箱', this.userInfo?.email ?? '未绑定', '用于登录和安全验证');
-      this.buildRecord('登录设备', '2 台设备', '最近登录：今天 10:32');
-      Button('修改密码')
-        .width('100%')
-        .height(46)
-        .margin({ top: 16 })
-        .backgroundColor(PRIMARY)
-        .fontColor(Color.White)
-        .borderRadius(8);
-    }
-    .width('100%')
-    .padding(18)
-    .backgroundColor(SURFACE)
-    .borderRadius(8);
-  }
-
-  @Builder
-  private buildRecords() {
-    Column() {
-      if (this.panel === 'sharing') {
-        this.buildRecord('毫米波波束成形阵列模板', '共享给 8 位成员', '今天 10:20');
-        this.buildRecord('5G 天线设计项目', '共享给项目组', '昨天 16:45');
-      } else {
-        this.buildRecord('S11 参数测试数据.csv', '上传成功 · 2.4 MB', '今天 09:24');
-        this.buildRecord('贴片天线阵列模型.zip', '上传成功 · 18.6 MB', '昨天 14:12');
-      }
-    }
-    .width('100%')
-    .padding({ left: 18, right: 18 })
-    .backgroundColor(SURFACE)
-    .borderRadius(8);
-  }
-
-  @Builder
   private buildRepos() {
     Column() {
       this.buildRecord('毫米波 8×8 相控阵天线设计', '昨日更新', '2 个仿真文件 · 1 个报告');
@@ -812,130 +775,6 @@ struct Index {
     .padding({ left: 18, right: 18 })
     .backgroundColor(SURFACE)
     .borderRadius(8);
-  }
-
-  @Builder
-  @Builder
-  private buildMessages() {
-    Column() {
-      // ── TabBar ──
-      Row() {
-        this.buildMessageTab('互动消息', 0)
-        this.buildMessageTab('管理员消息', 1)
-        this.buildMessageTab('系统通知', 2)
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Start)
-      .padding({ top: 8, bottom: 8 })
-      .border({ width: { bottom: 1 }, color: DIVIDER })
-
-      // ── 内容区（按 msgTabIndex 切换） ──
-      Scroll() {
-        Column() {
-          if (this.msgTabIndex === 0) {
-            this.buildMessageItem('李明', '李明 回复了你的评论',
-              '这个阵列间距设置非常合理，感谢分享！', '10 分钟前', true);
-            this.buildMessageItem('王浩', '王浩 赞了你的模板',
-              '毫米波波束成形阵列模板获得新赞', '2 小时前', true);
-            this.buildMessageItem('赵敏', '赵敏 评论了你的项目',
-              '5G基站MIMO阵列的仿真结果很有参考价值', '昨天', false);
-            this.buildMessageItem('陈工', '陈工 分享了文件给你',
-              '天线测试报告_v3.pdf · 12.5 MB', '3 天前', true);
-          } else if (this.msgTabIndex === 1) {
-            this.buildMessageItem('管理员', '账号安全提醒',
-              '检测到新设备登录，如非本人操作请及时修改密码', '1 小时前', true);
-            this.buildMessageItem('管理员', '实名认证通知',
-              '请尽快完成实名认证，以解锁全部功能', '3 天前', false);
-            this.buildMessageItem('管理员', '存储空间升级',
-              '您的存储空间已使用 80%，建议清理或升级', '1 周前', false);
-          } else {
-            this.buildMessageItem('系统', '项目同步完成',
-              '「毫米波 8×8 相控阵天线设计」已成功同步至云端', '30 分钟前', true);
-            this.buildMessageItem('系统', '模板审核通过',
-              '您提交的「微带贴片天线阵列模板」已通过审核', '昨天', false);
-            this.buildMessageItem('系统', '版本更新通知',
-              '系统已更新至 v2.3.0，新增多项功能', '2 天前', true);
-            this.buildMessageItem('系统', '备份完成',
-              '所有项目文件已于 2026-09-23 03:00 完成自动备份', '3 天前', false);
-          }
-        }
-        .width('100%')
-        .height('100%')
-        .padding({ top: 24 })
-      }
-      .width('100%')
-      .layoutWeight(1)
-    }
-    .width('100%');
-  }
-
-  @Builder
-  private buildMessageTab(title: string, index: number) {
-    Column() {
-      Text(title)
-        .fontSize(14)
-        .fontColor(this.msgTabIndex === index ? PRIMARY : TEXT_SECONDARY)
-        .fontWeight(this.msgTabIndex === index ? FontWeight.Bold : FontWeight.Regular)
-        .padding({ bottom: 4 })
-        .border({
-          width: this.msgTabIndex === index ? { bottom: 2 } : 0,
-          color: PRIMARY
-        })
-    }
-    .height(48)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16 })
-    .onClick(() => this.msgTabIndex = index);
-  }
-
-  @Builder
-  private buildMessageItem(name: string, title: string, summary: string, time: string, unread: boolean) {
-    Row() {
-      // ── 左侧：彩色圆形头像 ──
-      Text(name.charAt(0))
-        .fontSize(22)
-        .fontColor(Color.White)
-        .fontWeight(FontWeight.Bold)
-        .width(56)
-        .height(56)
-        .textAlign(TextAlign.Center)
-        .borderRadius(28)
-        .backgroundColor(PRIMARY);
-
-      // ── 中间：消息内容 ──
-      Column({ space: 4 }) {
-        Text(title)
-          .fontSize(15)
-          .fontWeight(unread ? FontWeight.Medium : FontWeight.Regular)
-          .fontColor(TEXT_PRIMARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Text(summary)
-          .fontSize(12)
-          .fontColor(TEXT_SECONDARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Text(time)
-          .fontSize(12)
-          .fontColor(TEXT_MUTED);
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 });
-
-      // ── 右侧：未读蓝点 ──
-      if (unread) {
-        Circle()
-          .width(8)
-          .height(8)
-          .fill(PRIMARY)
-          .margin({ left: 12 });
-      }
-    }
-    .width('100%')
-    .padding({ top: 16, bottom: 16 })
-    .border({ width: { bottom: 1 }, color: DIVIDER });
   }
 
   @Builder
