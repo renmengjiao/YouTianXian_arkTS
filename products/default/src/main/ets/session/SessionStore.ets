@@ -10,7 +10,7 @@ export interface RememberedSession {
 /** 仅保存刷新令牌，不保存密码或访问令牌。 */
 export class SessionStore {
   private static alias(): Uint8Array {
-    return new util.TextEncoder().encodeInto('YouTianXian.session.v1');
+    return new util.TextEncoder().encodeInto('YouTianXian.main-api.session.v1');
   }
 
   private static query(): asset.AssetMap {

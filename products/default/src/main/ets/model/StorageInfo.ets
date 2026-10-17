@@ -1,18 +1,16 @@
-/** 后端存储 DTO，容量统一为数值 MB。 */
+/** 存储概览 */
 export interface StorageInfo {
-  totalSpace: number;
-  usedSpace: number;
-  availableSpace: number;
-  usagePercentage: number;
-  filesCount: number;
-  foldersCount: number;
-  lastUpdated: string | null;
-  storageBreakdown: StorageBreakdown[];
+  totalSpace: string;        // 总容量，如 "512 GB"
+  usedSpace: string;         // 已用容量，如 "422.28 GB"
+  usedPercent: number;       // 使用百分比，如 82
+  details: StorageDetail[];  // 各分类详情
 }
 
-export interface StorageBreakdown {
-  type: string;
-  used: number;
-  percentage: number; // 占已用空间百分比，服务端按字节计算并取整。
-  count: number;
+/** 存储分类详情 */
+export interface StorageDetail {
+  category: string;          // 类别名
+  size: string;              // 占用大小，如 "34.5 GB"
+  percent: number;           // 占总空间百分比
+  usedPercent: number;       // 占已用空间百分比
+  color: string;             // 颜色标识
 }

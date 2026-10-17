@@ -10,3 +10,11 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+/validation/
+/.env
+/.env.*
+!/.env.example
+*.p12
+*.pfx
+*.jks
+*.keystore

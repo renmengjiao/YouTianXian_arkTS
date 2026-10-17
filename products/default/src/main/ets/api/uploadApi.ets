@@ -1,18 +1,17 @@
 import { HttpClient, ApiResponse, PageData } from './httpClient';
-import { UploadRecord, UploadRecordFilter, ClearUploadRecordsRequest, ClearRecordsResult } from '../model/CommonModels';
-
-interface PageParams extends UploadRecordFilter { page: number; pageSize: number; }
-
-export function fetchUploadRecords(page: number, pageSize: number,
-  filter: UploadRecordFilter = {}): Promise<ApiResponse<PageData<UploadRecord>>> {
-  const params: PageParams = { page: page, pageSize: pageSize };
-  if (filter.startTime?.trim()) params.startTime = filter.startTime.trim();
-  if (filter.endTime?.trim()) params.endTime = filter.endTime.trim();
-  if (filter.status && filter.status !== 'all') params.status = filter.status;
-  return HttpClient.getInstance().get<PageData<UploadRecord>>('/user/upload-records', params);
+import { UploadRecord } from '../model/CommonModels';
+import { PageDto, UploadDto, adaptUpload, adaptPage } from './BackendAdapters';
+interface PageQuery { page: number; pageSize: number; }
+interface ClearBody { clearAll: boolean; }
+export async function fetchUploadRecords(page: number, pageSize: number): Promise<ApiResponse<PageData<UploadRecord>>> {
+  const params: PageQuery = { page: page, pageSize: pageSize };
+  const res = await HttpClient.getInstance().get<PageDto<UploadDto>>('/user/upload-records', params);
+  const pageData = adaptPage<UploadDto>(res.data);
+  const data: PageData<UploadRecord> = { items: pageData.items.map((item: UploadDto): UploadRecord => adaptUpload(item)),
+    total: pageData.total, page: pageData.page, page_size: pageData.page_size };
+  return { code: res.code, message: res.message, data: data };
 }
-
-/** 仅清理日志，不删除文件或释放存储。 */
-export function clearUploadRecords(body: ClearUploadRecordsRequest): Promise<ApiResponse<ClearRecordsResult>> {
-  return HttpClient.getInstance().deleteJson<ClearRecordsResult>('/user/upload-records', body);
+export function clearUploadRecords(): Promise<ApiResponse<null>> {
+  const body: ClearBody = { clearAll: true };
+  return HttpClient.getInstance().deleteJson<null>('/user/upload-records', body);
 }

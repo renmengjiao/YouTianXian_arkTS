@@ -1,6 +1,6 @@
-import { login, register, refresh, logout } from '../api/userApi';
+import { login, refresh, logout } from '../api/userApi';
 import { HttpClient, ApiResponse, ApiError, ApiErrorKind } from '../api/httpClient';
-import { LoginRequest, RegisterRequest, LoginResponse, UserInfo } from '../model/UserInfo';
+import { LoginRequest, LoginResponse, UserInfo } from '../model/UserInfo';
 import { SessionStore } from './SessionStore';
 
 interface ActiveSession {
@@ -173,9 +173,6 @@ export class SessionManager {
     return this.authenticate(() => login(data), remember);
   }
 
-  register(data: RegisterRequest, remember: boolean): Promise<UserInfo> {
-    return this.authenticate(() => register(data), remember);
-  }
 
   private async performRestore(): Promise<UserInfo | null> {
     const generation = this.resetMemory();

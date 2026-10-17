@@ -1,11 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DIVIDER, PRIMARY, BORDER, DANGER } from '../constants/CommonConstants';
-import { changePassword } from '../api/userApi';
-import { ApiError, ApiErrorKind } from '../api/httpClient';
+import { fetchUserProfile, changePassword, logout } from '../api/userApi';
 import { UserInfo } from '../model/UserInfo';
-import { ProfileService } from '../profile/ProfileService';
-import { SessionManager } from '../session/SessionManager';
-import { LoginRecordsTab } from './LoginRecordsTab';
 
 @CustomDialog
 struct PasswordDialog {
@@ -25,19 +21,16 @@ struct PasswordDialog {
       TextInput({ placeholder: '请输入旧密码', text: this.oldPwd })
         .type(InputType.Password)
         .height(40)
-        .enabled(!this.submitting)
         .onChange((v) => { this.oldPwd = v; this.errorMsg = ''; });
 
       TextInput({ placeholder: '请输入新密码', text: this.newPwd })
         .type(InputType.Password)
         .height(40)
-        .enabled(!this.submitting)
         .onChange((v) => { this.newPwd = v; this.errorMsg = ''; });
 
       TextInput({ placeholder: '请确认新密码', text: this.confirmPwd })
         .type(InputType.Password)
         .height(40)
-        .enabled(!this.submitting)
         .onChange((v) => { this.confirmPwd = v; this.errorMsg = ''; });
 
       if (this.errorMsg) {
@@ -52,7 +45,6 @@ struct PasswordDialog {
           .borderRadius(6)
           .height(36)
           .layoutWeight(1)
-          .enabled(!this.submitting)
           .onClick(() => { this.controller.close(); });
 
         Button('确定')
@@ -63,7 +55,7 @@ struct PasswordDialog {
           .layoutWeight(1)
           .enabled(!this.submitting)
           .onClick(() => {
-            if (!this.oldPwd.trim() || !this.newPwd.trim() || !this.confirmPwd) {
+            if (!this.oldPwd || !this.newPwd || !this.confirmPwd) {
               this.errorMsg = '请填写所有字段';
               return;
             }
@@ -71,18 +63,15 @@ struct PasswordDialog {
               this.errorMsg = '两次密码输入不一致';
               return;
             }
-            if (this.newPwd.length < 6 || this.newPwd.length > 64) {
-              this.errorMsg = '新密码长度需在6~64位之间';
+            if (this.newPwd.length < 6) {
+              this.errorMsg = '新密码长度不能少于6位';
               return;
             }
             this.submitting = true;
             this.onConfirm(this.oldPwd, this.newPwd).then(() => {
-              this.oldPwd = '';
-              this.newPwd = '';
-              this.confirmPwd = '';
               this.controller.close();
-            }).catch((error: Error) => {
-              this.errorMsg = error.message || '修改失败，请重试';
+            }).catch(() => {
+              this.errorMsg = '修改失败，请重试';
               this.submitting = false;
             });
           });
@@ -96,102 +85,50 @@ struct PasswordDialog {
 
 @Component
 export struct SecurityTab {
-  @State private showingLoginRecords: boolean = false;
   onLogout: () => Promise<void> = async () => {};
-  onEditProfile: () => void = () => {};
   @State private userInfo: UserInfo | null = null;
-  @State private maskedPhone: string = '';
-  @State private loading: boolean = true;
-  @State private errorMessage: string = '';
-  private active: boolean = false;
-  private requestVersion: number = 0;
+  @State private maskedPhone: string = '暂无数据';
 
   private pwdDialogController: CustomDialogController | null = null;
 
   aboutToAppear() {
-    this.active = true;
     this.loadUserData();
     this.pwdDialogController = new CustomDialogController({
       builder: PasswordDialog({
         onConfirm: async (oldPwd, newPwd) => {
-          const user = this.userInfo;
-          if (!user) throw new Error('请先成功读取账号资料');
-          const manager = SessionManager.getInstance();
-          const generation = manager.getSessionGeneration();
-          manager.assertCurrentUser(user.userId, generation);
-          try {
-            await changePassword({ oldPassword: oldPwd, newPassword: newPwd });
-          } catch (error) {
-            manager.assertCurrentUser(user.userId, generation);
-            const failure = error as ApiError;
-            if (failure instanceof ApiError && (failure.kind === ApiErrorKind.NETWORK
-              || failure.kind === ApiErrorKind.RESPONSE || failure.httpStatus >= 500)) {
-              throw new Error('密码修改结果未确认，请退出后尝试用新密码登录核对。' + failure.message);
-            }
-            throw error as Error;
+          const res = await changePassword({ oldPassword: oldPwd, newPassword: newPwd });
+          if (res.code !== 200) {
+            throw new Error(res.message);
           }
-          manager.assertCurrentUser(user.userId, generation);
-          if (this.active) {
-            promptAction.showToast({ message: '密码修改成功', duration: 2000 });
-          }
+          promptAction.showToast({ message: '密码修改成功', duration: 2000 });
         }
       }),
       alignment: DialogAlignment.Center,
       customStyle: true,
-      autoCancel: false,
       cornerRadius: 12,
       width: '85%'
     });
   }
 
-  aboutToDisappear(): void {
-    this.active = false;
-    this.requestVersion++;
-    this.pwdDialogController?.close();
-  }
-
-  private async loadUserData(): Promise<void> {
-    const version = ++this.requestVersion;
-    this.loading = true;
-    this.errorMessage = '';
-    this.userInfo = null;
-    this.maskedPhone = '';
+  async loadUserData() {
     try {
-      const snapshot = await ProfileService.load();
-      if (this.active && version === this.requestVersion) {
-        this.userInfo = snapshot.profile;
-        const phone = snapshot.profile.phone ?? '';
-        this.maskedPhone = phone.length === 11
-          ? phone.substring(0, 3) + '****' + phone.substring(7)
-          : (phone ? '号码格式待核对' : '');
+      const res = await fetchUserProfile();
+      if (res.code === 200 && res.data) {
+        this.userInfo = res.data;
+        const p = res.data.phone || '';
+        if (p.length === 11) {
+          this.maskedPhone = p.substring(0, 3) + '****' + p.substring(7);
+        } else if (p) {
+          this.maskedPhone = p.substring(0, 3) + '****' + p.substring(p.length - 4);
+        }
       }
-    } catch (error) {
-      if (this.active && version === this.requestVersion) {
-        this.errorMessage = (error as Error).message || '账号资料读取失败';
-      }
-    } finally {
-      if (this.active && version === this.requestVersion) this.loading = false;
+    } catch (e) {
+      console.error('[SecurityTab] 加载用户数据失败', e);
     }
   }
 
   build() {
-    if (this.showingLoginRecords) {
-      LoginRecordsTab({ onBack: () => this.showingLoginRecords = false });
-    } else {
-      this.securityContent();
-    }
-  }
-
-  @Builder
-  private securityContent() {
     Column() {
-      if (this.loading) {
-        Text('正在读取账号资料...').fontColor(TEXT_MUTED);
-      }
-      if (this.errorMessage) {
-        Text(this.errorMessage).fontColor(DANGER);
-        Button('重新读取').enabled(!this.loading).onClick(() => this.loadUserData());
-      }
       List({ space: 8 }) {
         // 登录密码
         ListItem() {
@@ -202,7 +139,7 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('登录密码').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text('新密码需为6—64位').fontSize(12).fontColor(TEXT_MUTED);
+              Text('上次修改：暂无数据').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
@@ -213,7 +150,6 @@ export struct SecurityTab {
               .border({ width: 1, color: BORDER })
               .borderRadius(4)
               .padding({ left: 14, right: 14, top: 6, bottom: 6 })
-              .enabled(!this.loading && this.userInfo !== null)
               .onClick(() => {
                 this.pwdDialogController?.open();
               });
@@ -230,7 +166,7 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('手机号绑定').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text(this.loading ? '正在读取' : (this.errorMessage ? '资料未读取成功' : (this.maskedPhone ? '已绑定 ' + this.maskedPhone : '未绑定'))).fontSize(12).fontColor(TEXT_MUTED);
+              Text(this.userInfo?.phone ? '已绑定 ' + this.maskedPhone : '未绑定').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
@@ -240,9 +176,7 @@ export struct SecurityTab {
               .backgroundColor(Color.Transparent)
               .border({ width: 1, color: BORDER })
               .borderRadius(4)
-              .padding({ left: 14, right: 14, top: 6, bottom: 6 })
-              .enabled(!this.loading && this.userInfo !== null)
-              .onClick(() => this.onEditProfile());
+              .padding({ left: 14, right: 14, top: 6, bottom: 6 });
           }
           .height(64).padding({ left: 16, right: 16 });
         }
@@ -256,13 +190,12 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('生物识别').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text('当前暂不支持').fontSize(12).fontColor(TEXT_MUTED);
+              Text('指纹 / 面容解锁').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
 
-            Button('暂不支持')
-              .enabled(false)
+            Button('开启')
               .fontSize(12).fontColor(TEXT_SECONDARY)
               .backgroundColor(Color.Transparent)
               .border({ width: 1, color: BORDER })
@@ -281,13 +214,12 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('两步验证').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text('当前暂不支持').fontSize(12).fontColor(TEXT_MUTED);
+              Text('增加额外安全保护').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
 
-            Button('暂不支持')
-              .enabled(false)
+            Button('管理')
               .fontSize(12).fontColor(TEXT_SECONDARY)
               .backgroundColor(Color.Transparent)
               .border({ width: 1, color: BORDER })
@@ -299,9 +231,6 @@ export struct SecurityTab {
       }
       .divider({ strokeWidth: 1, color: DIVIDER, startMargin: 16, endMargin: 16 })
       .width('100%');
-
-      Button('查看登录记录').margin({ top: 12 })
-        .onClick(() => this.showingLoginRecords = true);
 
       Blank().layoutWeight(1);
 
@@ -324,13 +253,20 @@ export struct SecurityTab {
           secondaryButton: {
             value: '确定',
             action: async () => {
-              await this.onLogout();
+              try {
+                await this.onLogout();
+              } catch (e) {
+                console.error('[SecurityTab] 退出失败', e);
+              }
+
             }
           }
         });
       });
     }
+    .layoutWeight(1)
     .width('100%')
+    .height('100%')
     .padding(24)
     .backgroundColor(SURFACE)
     .borderRadius(12);

@@ -1,16 +1,10 @@
-/** 后端共享记录：当前用户分享出去的内容。 */
+/** 共享记录 */
 export interface ShareRecord {
   id: string;
-  fileName: string | null;
-  fileType: string;
-  fileSize: string | null;
-  sharedWith: string[];
-  shareTime: string | null;
-  permission: string;
-  expireTime: string | null;
-  status: string;
-  previewUrl: string | null;
-  downloadUrl: string | null;
+  title: string;             // 项目/文件名
+  sharedBy: string;          // 分享者
+  sharedDate: string;        // 分享日期
+  projectId?: string;        // 项目 ID
 }
 
 /** 消息 */
@@ -23,40 +17,22 @@ export interface Message {
   createdAt: string;
 }
 
-/** 后端登录记录。 */
+/** 登录记录 */
 export interface LoginRecord {
-  id: string;
-  loginTime: string | null;
-  ipAddress: string | null;
-  location: string | null;
-  deviceType: string | null;
-  deviceInfo: string | null;
-  status: string;
-  sessionDuration: number | null;
+  id: number;
+  device: string;
+  location: string;
+  ip: string;
+  time: string;
+  status: string;            // success / failed
 }
 
-/** 后端模板上传日志，进度是状态推导值。 */
+/** 上传记录 */
 export interface UploadRecord {
   id: string;
-  fileName: string | null;
-  fileType: string;
-  templateType: string | null;
-  fileSize: string | null;
-  uploadTime: string | null;
-  uploadStatus: string;
-  storagePath: string | null;
-  uploadProgress: number;
-  templateVersion: string | null;
-  description: string | null;
+  fileName: string;
+  fileSize: string;
+  uploadTime: string;
+  status: string;            // completed / uploading / failed
+  progress?: number;
 }
-
-export interface RecordTimeFilter {
-  startTime?: string;
-  endTime?: string;
-}
-export interface LoginRecordFilter extends RecordTimeFilter { deviceType?: string; }
-export interface UploadRecordFilter extends RecordTimeFilter { status?: string; }
-export interface ShareRecordFilter extends RecordTimeFilter { fileType?: string; }
-export interface ClearLoginRecordsRequest { clearAll?: boolean; beforeTime?: string; }
-export interface ClearUploadRecordsRequest { clearAll?: boolean; ids?: string[]; }
-export interface ClearRecordsResult { deletedCount: number; }

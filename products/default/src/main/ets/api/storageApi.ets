@@ -1,10 +1,7 @@
-/**
- * 存储 API
- */
 import { HttpClient, ApiResponse } from './httpClient';
 import { StorageInfo } from '../model/StorageInfo';
-
-/** 获取存储概览 */
-export function fetchStorageInfo(): Promise<ApiResponse<StorageInfo>> {
-  return HttpClient.getInstance().get<StorageInfo>('/user/storage');
+import { StorageDto, adaptStorage } from './BackendAdapters';
+export async function fetchStorageInfo(): Promise<ApiResponse<StorageInfo>> {
+  const res = await HttpClient.getInstance().get<StorageDto>('/user/storage');
+  return { code: res.code, message: res.message, data: adaptStorage(res.data) };
 }

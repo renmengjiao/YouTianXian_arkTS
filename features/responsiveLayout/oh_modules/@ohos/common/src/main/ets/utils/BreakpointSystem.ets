@@ -51,10 +51,6 @@ export class BreakpointSystem {
       }
 
       breakpoint.mediaQueryListener = uiContext.getMediaQuery().matchMediaSync(condition);
-      if (breakpoint.mediaQueryListener.matches) {
-        this.updateCurrentBreakpoint(breakpoint.name);
-      }
-
       breakpoint.mediaQueryListener.on('change', (mediaQueryResult: mediaquery.MediaQueryResult) => {
         if (mediaQueryResult.matches) {
           this.updateCurrentBreakpoint(breakpoint.name);

@@ -14,10 +14,10 @@ export interface ApiResponse<T> {
 
 /** 分页数据包装 */
 export interface PageData<T> {
-  list: T[];
+  items: T[];
   total: number;
   page: number;
-  pageSize: number;
+  page_size: number;
 }
 
 /** 请求选项 */
