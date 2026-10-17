@@ -108,9 +108,45 @@ if (!(Test-Path -LiteralPath $taskHap -PathType Leaf)) { throw 'HAP missing. Run
 if ($taskOrigin.IsLoopback -and !$taskForwardMatch.Success) {
     Write-Host (Invoke-TaskHdc @('rport', ('tcp:' + $taskOrigin.Port), ('tcp:' + $taskOrigin.Port)))
 }
+# Stop before updating. A stop immediately after installation can race a new launch.
+if ((Invoke-TaskHdc @('shell', 'pidof', $taskBundle)).Trim()) {
+    Invoke-TaskHdc @('shell', 'aa', 'force-stop', $taskBundle) | Out-Null
+    $taskStopDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ((Invoke-TaskHdc @('shell', 'pidof', $taskBundle)).Trim()) {
+        if ([DateTime]::UtcNow -ge $taskStopDeadline) { throw 'The existing app did not stop before installation.' }
+        Start-Sleep -Milliseconds 300
+    }
+}
 $taskInstalled = Invoke-TaskHdc @('install', '-r', $taskHap)
 if ($taskInstalled -notmatch 'install bundle successfully') { throw "Install did not succeed: $taskInstalled" }
-Invoke-TaskHdc @('shell', 'aa', 'force-stop', $taskBundle) | Out-Null
-$taskStarted = Invoke-TaskHdc @('shell', 'aa', 'start', '-a', 'DefaultAbility', '-b', $taskBundle)
-if ($taskStarted -notmatch 'start ability successfully') { throw "App did not start: $taskStarted" }
+function Test-TaskAppReady {
+    if (!(Invoke-TaskHdc @('shell', 'pidof', $taskBundle)).Trim()) { return $false }
+    $taskRemoteLayout = '/data/local/tmp/youtianxian-startup-check.json'
+    try {
+        $taskDump = Invoke-TaskHdc @('shell', 'uitest', 'dumpLayout', '-b', $taskBundle, '-p', $taskRemoteLayout)
+        if ($taskDump -notmatch 'DumpLayout saved to:') { return $false }
+        $taskLayout = Invoke-TaskHdc @('shell', 'cat', $taskRemoteLayout)
+        # Inspect only node types, never print or store form values or session data.
+        return ([regex]::Matches($taskLayout, '"type"\s*:\s*"Text"').Count -ge 6)
+    } catch { return $false }
+    finally {
+        Invoke-TaskHdc @('shell', 'rm', '-f', $taskRemoteLayout) | Out-Null
+    }
+}
+$taskReady = $false
+for ($taskAttempt = 1; $taskAttempt -le 3; $taskAttempt++) {
+    $taskStarted = Invoke-TaskHdc @('shell', 'aa', 'start', '-a', 'DefaultAbility', '-b', $taskBundle)
+    if ($taskStarted -notmatch 'start ability successfully') { throw "App did not start: $taskStarted" }
+    $taskStartDeadline = [DateTime]::UtcNow.AddSeconds(8)
+    while ([DateTime]::UtcNow -lt $taskStartDeadline) {
+        if (Test-TaskAppReady) {
+            Start-Sleep -Milliseconds 600
+            if (Test-TaskAppReady) { $taskReady = $true; break }
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    if ($taskReady) { break }
+    Write-Host "Waiting for the application window; retry $taskAttempt of 3..."
+}
+if (!$taskReady) { throw 'The app did not show a stable login/workspace window. Check the emulator and application logs.' }
 Write-Host "Installed and started on $DeviceId. Sign in with your backend account. Window sizing is unchanged."
