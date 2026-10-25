@@ -1,6 +1,6 @@
 /** 共享记录 */
 export interface ShareRecord {
-  id: number;
+  id: string;
   title: string;             // 项目/文件名
   sharedBy: string;          // 分享者
   sharedDate: string;        // 分享日期
@@ -29,7 +29,7 @@ export interface LoginRecord {
 
 /** 上传记录 */
 export interface UploadRecord {
-  id: number;
+  id: string;
   fileName: string;
   fileSize: string;
   uploadTime: string;

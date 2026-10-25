@@ -6,6 +6,7 @@ import { UserInfo, LoginRequest, RegisterRequest, LoginResponse,
   PasswordUpdate, NotificationSettings } from '../model/UserInfo';
 import { LoginRecord } from '../model/CommonModels';
 import { PageData } from './httpClient';
+import { AuthDto, ProfileDto, adaptAuth, adaptProfile, EditableProfile, profileBody } from './BackendAdapters';
 
 /** 头像上传响应 */
 interface AvatarResponse {
@@ -22,9 +23,18 @@ interface AvatarBody {
   fileUri: string;
 }
 
+interface RefreshBody { refreshToken: string; }
+
 /** 登录 */
-export function login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
-  return HttpClient.getInstance().post<LoginResponse>('/auth/login', data);
+export async function login(data: LoginRequest): Promise<ApiResponse<LoginResponse>> {
+  const res = await HttpClient.getInstance().postPublic<AuthDto>('/auth/login', data);
+  return { code: res.code, message: res.message, data: adaptAuth(res.data) };
+}
+
+export async function refresh(refreshToken: string): Promise<ApiResponse<LoginResponse>> {
+  const body: RefreshBody = { refreshToken: refreshToken };
+  const res = await HttpClient.getInstance().postPublic<AuthDto>('/auth/refresh', body);
+  return { code: res.code, message: res.message, data: adaptAuth(res.data) };
 }
 
 /** 注册 */
@@ -33,13 +43,14 @@ export function register(data: RegisterRequest): Promise<ApiResponse<LoginRespon
 }
 
 /** 获取用户信息 */
-export function fetchUserProfile(): Promise<ApiResponse<UserInfo>> {
-  return HttpClient.getInstance().get<UserInfo>('/user/profile');
+export async function fetchUserProfile(): Promise<ApiResponse<UserInfo>> {
+  const res = await HttpClient.getInstance().get<ProfileDto>('/user/profile');
+  return { code: res.code, message: res.message, data: adaptProfile(res.data) };
 }
 
 /** 编辑用户信息 */
-export function updateUserProfile(data: object): Promise<ApiResponse<UserInfo>> {
-  return HttpClient.getInstance().put<UserInfo>('/user/profile', data);
+export function updateUserProfile(data: EditableProfile, previousPhone: string = ''): Promise<ApiResponse<null>> {
+  return HttpClient.getInstance().put<null>('/user/profile', profileBody(data, previousPhone));
 }
 
 /** 上传头像 */
@@ -81,6 +92,7 @@ export function clearLoginRecords(): Promise<ApiResponse<null>> {
 }
 
 /** 退出登录 */
-export function logout(): Promise<ApiResponse<null>> {
-  return HttpClient.getInstance().post<null>('/auth/logout');
+export function logout(refreshToken: string = ''): Promise<ApiResponse<null>> {
+  const body: RefreshBody = { refreshToken: refreshToken };
+  return HttpClient.getInstance().postPublic<null>('/auth/logout', body);
 }

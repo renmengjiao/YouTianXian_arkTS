@@ -85,8 +85,9 @@ struct PasswordDialog {
 
 @Component
 export struct SecurityTab {
+  onLogout: () => Promise<void> = async () => {};
   @State private userInfo: UserInfo | null = null;
-  @State private maskedPhone: string = '138****8888';
+  @State private maskedPhone: string = '暂无数据';
 
   private pwdDialogController: CustomDialogController | null = null;
 
@@ -96,7 +97,7 @@ export struct SecurityTab {
       builder: PasswordDialog({
         onConfirm: async (oldPwd, newPwd) => {
           const res = await changePassword({ oldPassword: oldPwd, newPassword: newPwd });
-          if (res.code !== 0) {
+          if (res.code !== 200) {
             throw new Error(res.message);
           }
           promptAction.showToast({ message: '密码修改成功', duration: 2000 });
@@ -112,7 +113,7 @@ export struct SecurityTab {
   async loadUserData() {
     try {
       const res = await fetchUserProfile();
-      if (res.code === 0 && res.data) {
+      if (res.code === 200 && res.data) {
         this.userInfo = res.data;
         const p = res.data.phone || '';
         if (p.length === 11) {
@@ -138,7 +139,7 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('登录密码').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text('上次修改：2026年6月').fontSize(12).fontColor(TEXT_MUTED);
+              Text('上次修改：暂无数据').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
@@ -165,7 +166,7 @@ export struct SecurityTab {
 
             Column({ space: 4 }) {
               Text('手机号绑定').fontSize(14).fontColor(TEXT_PRIMARY);
-              Text('已绑定 ' + this.maskedPhone).fontSize(12).fontColor(TEXT_MUTED);
+              Text(this.userInfo?.phone ? '已绑定 ' + this.maskedPhone : '未绑定').fontSize(12).fontColor(TEXT_MUTED);
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start);
@@ -253,11 +254,11 @@ export struct SecurityTab {
             value: '确定',
             action: async () => {
               try {
-                await logout();
+                await this.onLogout();
               } catch (e) {
                 console.error('[SecurityTab] 退出失败', e);
               }
-              promptAction.showToast({ message: '已退出登录', duration: 1500 });
+
             }
           }
         });

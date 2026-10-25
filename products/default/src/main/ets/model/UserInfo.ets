@@ -1,6 +1,8 @@
 /** 用户信息 */
 export interface UserInfo {
-  id: number;
+  id: string;
+  userId: string;
+  nickname: string;
   username: string;
   name: string;
   email: string;
@@ -13,7 +15,7 @@ export interface UserInfo {
 
 /** 登录请求 */
 export interface LoginRequest {
-  username: string;
+  account: string;
   password: string;
 }
 
@@ -27,7 +29,11 @@ export interface RegisterRequest {
 
 /** 登录响应 */
 export interface LoginResponse {
-  token: string;
+  token: string; // Legacy registration branch is deliberately outside this alignment.
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
   user: UserInfo;
 }
 

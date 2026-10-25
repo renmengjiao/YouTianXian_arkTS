@@ -3,6 +3,7 @@ import {
   PRIMARY, SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, DIVIDER, TEXT_MUTED, BORDER
 } from '../constants/CommonConstants';
 import { fetchUserProfile, updateUserProfile } from '../api/userApi';
+import { SessionManager } from '../session/SessionManager';
 
 /** 个人信息更新 body */
 interface ProfileUpdateBody {
@@ -19,25 +20,36 @@ export struct BasicInfoTab {
   @Link email: string;
   @Link department: string;
 
+  private previousPhone: string = '';
+  private active: boolean = false;
+  private requestVersion: number = 0;
   @State private loading: boolean = true;
   @State private saving: boolean = false;
 
   aboutToAppear(): void {
+    this.active = true;
+    this.previousPhone = this.phone;
     this.loadData();
   }
 
+  aboutToDisappear(): void { this.active = false; this.requestVersion++; }
+
   async loadData(): Promise<void> {
+    const version = ++this.requestVersion;
+    const generation = SessionManager.getInstance().getSessionGeneration();
     this.loading = true;
     try {
       const res = await fetchUserProfile();
-      if (res.code === 0 && res.data) {
+      if (this.active && version === this.requestVersion && res.code === 200 && res.data) {
+        SessionManager.getInstance().updateProfile(res.data, generation);
+        this.previousPhone = res.data.phone;
         this.name = res.data.name;
         this.phone = res.data.phone;
         this.email = res.data.email;
         this.department = res.data.department;
       }
     } catch (e) {
-      // 静默失败，保留父组件传入的初始值
+      if (this.active) promptAction.showToast({ message: (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -45,24 +57,19 @@ export struct BasicInfoTab {
 
   async handleSave(): Promise<void> {
     this.saving = true;
+    const generation = SessionManager.getInstance().getSessionGeneration();
+    let written = false;
     try {
-      const body: ProfileUpdateBody = {
-        name: this.name,
-        phone: this.phone,
-        email: this.email,
-        department: this.department
-      };
-      const res = await updateUserProfile(body as object);
-      if (res.code === 0) {
-        promptAction.showToast({ message: '保存成功', duration: 2000 });
-      } else {
-        promptAction.showToast({ message: res.message || '保存失败', duration: 2000 });
-      }
+      await updateUserProfile({ name: this.name, phone: this.phone, email: this.email, department: this.department }, this.previousPhone);
+      written = true;
+      const res = await fetchUserProfile();
+      if (!this.active) return;
+      SessionManager.getInstance().updateProfile(res.data, generation);
+      this.previousPhone = res.data.phone;
+      promptAction.showToast({ message: '保存成功', duration: 2000 });
     } catch (e) {
-      promptAction.showToast({ message: '保存失败，请检查网络', duration: 2000 });
-    } finally {
-      this.saving = false;
-    }
+      if (this.active) promptAction.showToast({ message: written ? '已提交保存，但重新读取失败，请重新打开资料核对' : (e as Error).message, duration: 2000 });
+    } finally { this.saving = false; }
   }
 
   build() {

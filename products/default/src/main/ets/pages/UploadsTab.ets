@@ -23,7 +23,7 @@ export struct UploadsTab {
         this.total = resp.data.total;
       }
     } catch (e) {
-      console.error('Failed to load upload records', JSON.stringify(e));
+      promptAction.showToast({ message: (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -34,8 +34,7 @@ export struct UploadsTab {
       const resp = await clearUploadRecords();
       if (resp.code === 200) {
         promptAction.showToast({ message: '已清空所有记录', duration: 1500 });
-        this.records = [];
-        this.total = 0;
+        await this.loadData();
       }
     } catch (e) {
       promptAction.showToast({ message: '清空失败', duration: 1500 });
@@ -46,6 +45,8 @@ export struct UploadsTab {
     if (status === 'completed') { return '已完成'; }
     if (status === 'uploading') { return '上传中'; }
     if (status === 'failed') { return '失败'; }
+    if (status === 'pending') { return '待处理'; }
+    if (status === 'rejected') { return '已拒绝'; }
     return status;
   }
 

@@ -5,6 +5,7 @@ import { fetchSharedRecords, deleteSharedRecord } from '../api/shareApi';
 
 @Component
 export struct SharingRecordTab {
+  @Prop sharer: string = '';
   @State private records: ShareRecord[] = [];
   @State private loading: boolean = false;
   @State private page: number = 1;
@@ -17,19 +18,19 @@ export struct SharingRecordTab {
   private async loadData(): Promise<void> {
     this.loading = true;
     try {
-      const resp = await fetchSharedRecords(this.page, 10);
+      const resp = await fetchSharedRecords(this.page, 10, this.sharer);
       if (resp.code === 200) {
         this.records = resp.data.items;
         this.total = resp.data.total;
       }
     } catch (e) {
-      console.error('Failed to load shared records', JSON.stringify(e));
+      promptAction.showToast({ message: (e as Error).message });
     } finally {
       this.loading = false;
     }
   }
 
-  private async handleDelete(id: number): Promise<void> {
+  private async handleDelete(id: string): Promise<void> {
     try {
       const resp = await deleteSharedRecord(id);
       if (resp.code === 200) {
@@ -77,7 +78,7 @@ export struct SharingRecordTab {
                     .borderRadius(12)
                     .height(28)
                     .onClick(() => {
-                      promptAction.showToast({ message: '打开项目: ' + (item.projectId ?? String(item.id)), duration: 1500 });
+                      promptAction.showToast({ message: '当前后端未提供项目打开入口', duration: 1500 });
                     });
 
                   Button('删除')

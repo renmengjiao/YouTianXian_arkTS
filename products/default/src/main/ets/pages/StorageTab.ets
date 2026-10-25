@@ -1,9 +1,11 @@
 import { SURFACE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, DIVIDER } from '../constants/CommonConstants';
 import { StorageInfo, StorageDetail } from '../model/StorageInfo';
 import { fetchStorageInfo } from '../api/storageApi';
+import { promptAction } from '@kit.ArkUI';
 
 @Component
 export struct StorageTab {
+  onLoaded: (info: StorageInfo) => void = () => {};
   @State private storageInfo: StorageInfo | null = null;
   @State private loading: boolean = false;
 
@@ -17,9 +19,10 @@ export struct StorageTab {
       const resp = await fetchStorageInfo();
       if (resp.code === 200) {
         this.storageInfo = resp.data;
+        this.onLoaded(resp.data);
       }
     } catch (e) {
-      console.error('Failed to load storage info', JSON.stringify(e));
+      promptAction.showToast({ message: (e as Error).message });
     } finally {
       this.loading = false;
     }

@@ -9,6 +9,10 @@ import { SecurityTab } from './SecurityTab';
 import { fetchUserProfile, login, register } from '../api/userApi';
 import { HttpClient, ApiResponse } from '../api/httpClient';
 import { UserInfo, LoginResponse } from '../model/UserInfo';
+import { SessionManager } from '../session/SessionManager';
+import { fetchStorageInfo } from '../api/storageApi';
+import { StorageInfo } from '../model/StorageInfo';
+import { updateUserProfile } from '../api/userApi';
 
 import {
   commonConstants,
@@ -26,6 +30,8 @@ struct Index {
   private readonly breakpointSystem: BreakpointSystem =
     new BreakpointSystem(commonConstants.breakpointSystemName);
 
+  @State private storageInfo: StorageInfo | null = null;
+  private active: boolean = false;
   @State private loggedIn: boolean = false;
   @State private authLoading: boolean = false;
   @State private registerMode: boolean = false;
@@ -45,26 +51,62 @@ struct Index {
 
   aboutToAppear(): void {
     this.breakpointSystem.register(this.getUIContext());
+    this.active = true;
+    SessionManager.getInstance().setListener((user: UserInfo | null) => {
+      if (!this.active) return;
+      this.userInfo = user;
+      this.loggedIn = user !== null;
+      if (!user) { this.password = ''; this.storageInfo = null; return; }
+      this.name = user.name; this.phone = user.phone; this.email = user.email; this.department = user.department;
+    });
+    SessionManager.getInstance().restore().then(async (user: UserInfo | null) => {
+      if (user && this.active) { this.panel = 'profile'; this.currentIndex = 0; await this.loadUserProfile(); await this.loadStorage(); }
+    }).catch((error: Error) => { if (this.active) promptAction.showToast({ message: error.message }); });
   }
 
   private async loadUserProfile(): Promise<void> {
+    const generation = SessionManager.getInstance().getSessionGeneration();
     this.isLoading = true;
     try {
       const resp = await fetchUserProfile();
       if (resp.code === 200) {
-        this.userInfo = resp.data;
+        SessionManager.getInstance().updateProfile(resp.data, generation);
       }
     } catch (e) {
-      console.error('Failed to load profile', JSON.stringify(e));
+      if (this.active) promptAction.showToast({ message: (e as Error).message });
     } finally {
       this.isLoading = false;
     }
   }
 
   aboutToDisappear(): void {
+    this.active = false;
+    SessionManager.getInstance().setListener(null);
     this.breakpointSystem.unregister();
   }
 
+  private async loadStorage(): Promise<void> {
+    const generation = SessionManager.getInstance().getSessionGeneration();
+    try {
+      const res = await fetchStorageInfo();
+      if (this.active && generation === SessionManager.getInstance().getSessionGeneration()) this.storageInfo = res.data;
+    } catch (error) { if (this.active) promptAction.showToast({ message: (error as Error).message }); }
+  }
+  private async handleLogout(): Promise<void> {
+    const result = await SessionManager.getInstance().logout();
+    this.panel = 'profile'; this.currentIndex = 0;
+    promptAction.showToast({ message: !result.storageCleared ? '已退出，但本机登录状态清除失败，请重试'
+      : result.remoteRevoked ? '已退出登录' : '已退出本机登录，远端会话撤销失败' });
+  }
+  private async saveStandaloneProfile(): Promise<void> {
+    const generation = SessionManager.getInstance().getSessionGeneration();
+    try {
+      await updateUserProfile({ name: this.name, phone: this.phone, email: this.email, department: this.department }, this.userInfo?.phone ?? '');
+      const res = await fetchUserProfile();
+      SessionManager.getInstance().updateProfile(res.data, generation);
+      promptAction.showToast({ message: '保存成功' });
+    } catch (error) { promptAction.showToast({ message: (error as Error).message }); }
+  }
   private isWideScreen(): boolean {
     return this.currentBreakpoint === 'lg' || this.currentBreakpoint === 'xl';
   }
@@ -227,10 +269,11 @@ struct Index {
           email: this.email.trim()
         });
       } else {
-        res = await login({
-          username: this.email.trim(),
-          password: this.password
-        });
+        await SessionManager.getInstance().login({ account: this.email.trim(), password: this.password }, this.remember);
+        this.panel = 'profile'; this.currentIndex = 0;
+        await this.loadUserProfile(); await this.loadStorage();
+        promptAction.showToast({ message: '登录成功' });
+        return;
       }
       if (res.code === 0 && res.data) {
         HttpClient.getInstance().setToken(res.data.token);
@@ -246,7 +289,7 @@ struct Index {
         promptAction.showToast({ message: res.message || '认证失败，请重试' });
       }
     } catch (e) {
-      promptAction.showToast({ message: '网络异常，请检查连接后重试' });
+      promptAction.showToast({ message: (e as Error).message || '网络异常，请检查连接后重试' });
     } finally {
       this.authLoading = false;
     }
@@ -309,9 +352,7 @@ struct Index {
         .fontColor(DANGER)
         .margin({ left: 20 })
         .onClick(() => {
-          this.loggedIn = false;
-          this.panel = 'home';
-          this.password = '';
+          this.handleLogout();
         });
     }
     .width('100%')
@@ -376,21 +417,21 @@ struct Index {
       // ---- 存储区 ----
       if (!this.sidebarCollapsed) {
         Column() {
-          Text('存储空间 25%')
+          Text(this.storageInfo ? '存储空间 ' + this.storageInfo.usedPercent + '%' : '存储空间 暂无数据')
             .fontSize(13)
             .fontColor(SIDEBAR_TEXT)
             .width('100%');
           Row() {
-            Progress({ value: 25, total: 100, type: ProgressType.Linear })
+            Progress({ value: this.storageInfo?.usedPercent ?? 0, total: 100, type: ProgressType.Linear })
               .width('100%')
               .height(6)
-              .value(25)
+              .value(this.storageInfo?.usedPercent ?? 0)
               .color(PRIMARY)
               .backgroundColor('#E8E8E8');
           }
           .width('100%')
           .padding({ top: 8, bottom: 6 });
-          Text('12.5 GB / 50 GB')
+          Text(this.storageInfo ? this.storageInfo.usedSpace + ' / ' + this.storageInfo.totalSpace : '暂无数据')
             .fontSize(12)
             .fontColor(SIDEBAR_GROUP_TITLE)
             .width('100%');
@@ -587,10 +628,10 @@ struct Index {
       Scroll() {
         Column() {
           if (this.currentIndex === 0) { BasicInfoTab({ name: this.name, phone: this.phone, email: this.email, department: this.department }) }
-          else if (this.currentIndex === 1) { SharingRecordTab() }
+          else if (this.currentIndex === 1) { SharingRecordTab({ sharer: this.userInfo?.name ?? '' }) }
           else if (this.currentIndex === 2) { UploadsTab() }
-          else if (this.currentIndex === 3) { StorageTab() }
-          else if (this.currentIndex === 4) { SecurityTab() }
+          else if (this.currentIndex === 3) { StorageTab({ onLoaded: (info: StorageInfo) => this.storageInfo = info }) }
+          else if (this.currentIndex === 4) { SecurityTab({ onLogout: () => this.handleLogout() }) }
         }
         .padding({ top: 24 })
       }
@@ -689,7 +730,7 @@ struct Index {
         .backgroundColor(PRIMARY)
         .fontColor(Color.White)
         .borderRadius(4)
-        .onClick(() => promptAction.showToast({ message: '个人资料已保存' }));
+        .onClick(() => this.saveStandaloneProfile());
     }
     .width('100%')
     .padding(18)
@@ -703,22 +744,22 @@ struct Index {
     Column({ space: 18 }) {
       Row() {
         Column({ space: 16 }) {
-          Text('24 GB').fontSize(28).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY);
-          Text('已使用，共 100 GB').fontSize(13).fontColor(TEXT_MUTED);
+          Text(this.storageInfo?.usedSpace ?? '暂无数据').fontSize(28).fontWeight(FontWeight.Bold).fontColor(TEXT_PRIMARY);
+          Text(this.storageInfo ? '已使用，共 ' + this.storageInfo.totalSpace : '暂无数据').fontSize(13).fontColor(TEXT_MUTED);
         }
         .alignItems(HorizontalAlign.Start);
         Blank();
-        Text('24%').fontSize(18).fontWeight(FontWeight.Medium).fontColor(PRIMARY);
+        Text(this.storageInfo ? this.storageInfo.usedPercent + '%' : '暂无数据').fontSize(18).fontWeight(FontWeight.Medium).fontColor(PRIMARY);
       }
       .width('100%');
-      Progress({ value: 24, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.storageInfo?.usedPercent ?? 0, total: 100, type: ProgressType.Linear })
         .width('100%')
         .height(10)
         .color(PRIMARY)
         .backgroundColor(PRIMARY_LIGHT);
-      this.buildRecord('项目文件', '15.6 GB', '65%');
-      this.buildRecord('测试数据', '6.8 GB', '28%');
-      this.buildRecord('其他文件', '1.6 GB', '7%');
+      this.buildRecord(this.storageInfo?.details[0]?.category ?? '项目文件', this.storageInfo?.details[0]?.size ?? '暂无数据', this.storageInfo ? (this.storageInfo.details[0]?.usedPercent ?? 0) + '%' : '暂无数据');
+      this.buildRecord(this.storageInfo?.details[1]?.category ?? '测试数据', this.storageInfo?.details[1]?.size ?? '暂无数据', this.storageInfo ? (this.storageInfo.details[1]?.usedPercent ?? 0) + '%' : '暂无数据');
+      this.buildRecord(this.storageInfo?.details[2]?.category ?? '其他文件', this.storageInfo?.details[2]?.size ?? '暂无数据', this.storageInfo ? (this.storageInfo.details[2]?.usedPercent ?? 0) + '%' : '暂无数据');
     }
     .width('100%')
     .padding(18)
@@ -732,7 +773,7 @@ struct Index {
     Column() {
       this.buildRecord('登录密码', '已设置', '定期修改密码可提升账号安全');
       this.buildRecord('绑定邮箱', this.userInfo?.email ?? '未绑定', '用于登录和安全验证');
-      this.buildRecord('登录设备', '2 台设备', '最近登录：今天 10:32');
+      this.buildRecord('登录设备', '暂无数据', '暂无数据');
       Button('修改密码')
         .width('100%')
         .height(46)
