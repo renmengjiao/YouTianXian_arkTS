@@ -1,6 +1,7 @@
 import { UserInfo, LoginResponse } from '../model/UserInfo';
 import { ShareRecord, UploadRecord } from '../model/CommonModels';
 import { StorageInfo, StorageDetail } from '../model/StorageInfo';
+import { TemplateInfo, AntennaType, FrequencyBand, TemplateStatus, SharePermission, StructureParam } from '../model/TemplateInfo';
 import { PRIMARY, PRIMARY_LIGHT, TEXT_MUTED } from '../constants/CommonConstants';
 import { ApiResponse, PageData } from './httpClient';
 
@@ -72,4 +73,88 @@ export function profileBody(draft: EditableProfile, previousPhone: string): Prof
   const body: ProfileBody = { nickname: draft.name, email: draft.email, department: draft.department };
   if (draft.phone.trim()) body.phone = draft.phone.trim();
   return body;
+}
+
+// ==================== 模板 DTO ====================
+
+export interface StructureParamDto {
+  paramName: string;
+  defaultValue: number;
+  minValue: number;
+  maxValue: number;
+  unit?: string;
+}
+
+export interface TemplateDto {
+  id: string;
+  name: string;
+  antennaType: string;
+  frequencyBands: string[];
+  description: string;
+  detailDescription?: string;
+  detailDocUrl?: string;
+  imageUrl: string;
+  aedtFileUrl: string;
+  structureParams: StructureParamDto[];
+  status: string;
+  isFavorited?: boolean;
+  ownerId: string;
+  ownerName: string;
+  createdAt: string;
+  updatedAt?: string;
+  downloadCount: number;
+  useCount: number;
+  rating?: number;
+  tags: string[];
+  shareLink?: string;
+  sharePermission?: string;
+  shareExpireAt?: string;
+}
+
+export type TemplatePageDto = PageDto<TemplateDto>;
+
+/** 适配模板DTO */
+export function adaptTemplate(dto: TemplateDto): TemplateInfo {
+  return {
+    id: dto.id,
+    name: dto.name,
+    antennaType: dto.antennaType as AntennaType,
+    frequencyBands: dto.frequencyBands.map((b: string): FrequencyBand => b as FrequencyBand),
+    description: dto.description,
+    detailDescription: dto.detailDescription,
+    detailDocUrl: dto.detailDocUrl,
+    imageUrl: dto.imageUrl,
+    aedtFileUrl: dto.aedtFileUrl,
+    structureParams: dto.structureParams.map((p: StructureParamDto): StructureParam => ({
+      paramName: p.paramName,
+      defaultValue: p.defaultValue,
+      minValue: p.minValue,
+      maxValue: p.maxValue,
+      unit: p.unit
+    })),
+    status: dto.status as TemplateStatus,
+    isFavorited: dto.isFavorited,
+    ownerId: dto.ownerId,
+    ownerName: dto.ownerName,
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+    downloadCount: dto.downloadCount,
+    useCount: dto.useCount,
+    rating: dto.rating,
+    tags: dto.tags,
+    shareLink: dto.shareLink,
+    sharePermission: dto.sharePermission as SharePermission,
+    shareExpireAt: dto.shareExpireAt
+  };
+}
+
+/** 适配模板分页 */
+export function adaptTemplatePage(dto: TemplatePageDto): PageData<TemplateInfo> {
+  const pageData = adaptPage<TemplateDto>(dto);
+  return {
+    items: pageData.items.map((item: TemplateDto): TemplateInfo => adaptTemplate(item)),
+    total: pageData.total,
+    page: pageData.page,
+    page_size: pageData.page_size
+  };
 }
